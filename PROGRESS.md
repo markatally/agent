@@ -6,7 +6,7 @@ This file tracks dynamic progress across Claude Code sessions. Update this file 
 
 ## Current Status
 
-**Last Updated:** 2026-01-30 18:40 (UTC+8)
+**Last Updated:** 2026-01-30 23:30 (UTC+8)
 **Active Phase:** Phase 6 - Advanced Features (ALL PHASES COMPLETE ✅🎉)
 **Blocked By:** None
 
@@ -14,11 +14,37 @@ This file tracks dynamic progress across Claude Code sessions. Update this file 
 
 **Note:** LLM and tool features require `LLM_API_KEY` to be set in `.env` for live testing.
 
+### TODO for Next Session (Testing)
+- [ ] Test Docker sandbox bash execution (start API server and send bash command via UI)
+- [ ] Create workspace directory: `mkdir -p /tmp/manus-workspaces`
+- [ ] Verify Colima/Docker is running: `colima start`
+- [ ] Verify sandbox image exists: `docker images manus-sandbox`
+
 ---
 
 ## Sessions Log
 
-### Session 5 — 2026-01-30 (Current)
+### Session 6 — 2026-01-30 (Current)
+
+**Docker Sandbox Socket Fix:**
+- ✅ Diagnosed sandbox error: `FailedToOpenSocket` when trying to execute bash commands
+- ✅ Root cause: `dockerode` library couldn't find Docker socket (Colima uses `~/.colima/default/docker.sock` instead of default `/var/run/docker.sock`)
+- ✅ Fixed `apps/api/src/services/sandbox/manager.ts`:
+  - Added `getDockerSocketOptions()` function to auto-detect Docker socket
+  - Checks `DOCKER_HOST` env var first
+  - Falls back to common socket locations (Colima, Docker Desktop, Podman, standard Linux)
+- ✅ Built `manus-sandbox:latest` Docker image (was missing)
+- ⏳ **TODO:** Test sandbox execution after restarting API server
+
+**Files Modified:**
+| File | Action | Notes |
+|------|--------|-------|
+| `apps/api/src/services/sandbox/manager.ts` | Updated | Added Docker socket auto-detection (~40 lines added) |
+| `manus-sandbox:latest` | Built | Docker image for sandbox execution |
+
+---
+
+### Session 5 — 2026-01-30
 
 **Bug Fixes & Integration Tests:**
 - ✅ Fixed `config.ts` path resolution issue:
