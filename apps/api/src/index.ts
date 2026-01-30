@@ -8,6 +8,7 @@ import { serve } from '@hono/node-server';
 import { authRoutes } from './routes/auth';
 import { sessionRoutes } from './routes/sessions';
 import { messageRoutes } from './routes/messages';
+import { streamRoutes } from './routes/stream';
 
 const app = new Hono();
 
@@ -35,6 +36,7 @@ app.get('/api/health', (c) => {
 app.route('/api/auth', authRoutes);
 app.route('/api/sessions', sessionRoutes);
 app.route('/api', messageRoutes); // Messages are nested under sessions
+app.route('/api', streamRoutes); // SSE streaming endpoints
 
 // 404 handler
 app.notFound((c) => {

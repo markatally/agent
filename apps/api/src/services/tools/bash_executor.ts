@@ -1,0 +1,114 @@
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
+import type { Tool, ToolResult, ToolContext } from './types';
+import { getConfig } from '../config';
+
+const execAsync = promisify(exec);
+
+/**
+ * Bash Executor Tool
+ * Executes bash/shell commands in the workspace
+ */
+export class BashExecutorTool implements Tool {
+  name = 'bash_executor';
+  description = 'Execute a bash/shell command in the sandbox environment';
+  requiresConfirmation = true; // Requires user approval
+  timeout = 60000;
+
+  inputSchema = {
+    type: 'object' as const,
+    properties: {
+      command: {
+        type: 'string' as const,
+        description: 'The bash command to execute',
+      },
+      workingDir: {
+        type: 'string' as const,
+        description: 'Working directory (default: /workspace)',
+      },
+    },
+    required: ['command'],
+  };
+
+  constructor(private context: ToolContext) {}
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+
+    try {
+      const command = params.command as string;
+      const workingDir = params.workingDir as string | undefined;
+
+      // Validate command
+      if (!command || typeof command !== 'string') {
+        return {
+          success: false,
+          output: '',
+          error: 'Command is required',
+          duration: Date.now() - startTime,
+        };
+      }
+
+      // Check for blocked commands
+      const config = getConfig();
+      for (const blocked of config.security.blockedCommands) {
+        if (command.includes(blocked)) {
+          return {
+            success: false,
+            output: '',
+            error: `Blocked command detected: ${blocked}`,
+            duration: Date.now() - startTime,
+          };
+        }
+      }
+
+      // Resolve working directory
+      let cwd = this.context.workspaceDir;
+      if (workingDir) {
+        cwd = path.resolve(this.context.workspaceDir, workingDir);
+
+        // Security check: ensure path is within workspace
+        if (!cwd.startsWith(this.context.workspaceDir)) {
+          return {
+            success: false,
+            output: '',
+            error: 'Access denied: working directory outside workspace',
+            duration: Date.now() - startTime,
+          };
+        }
+      }
+
+      // Execute command with timeout
+      const { stdout, stderr } = await execAsync(command, {
+        cwd,
+        timeout: this.timeout,
+        maxBuffer: 10 * 1024 * 1024, // 10MB max output
+        env: {
+          ...process.env,
+          HOME: this.context.workspaceDir,
+          USER: 'manus',
+        },
+      });
+
+      const output = stdout || stderr || '(no output)';
+
+      return {
+        success: true,
+        output,
+        duration: Date.now() - startTime,
+      };
+    } catch (error: any) {
+      // exec throws on non-zero exit codes
+      const output = error.stdout || '';
+      const errorMsg = error.stderr || error.message || 'Command failed';
+
+      return {
+        success: false,
+        output,
+        error: errorMsg,
+        duration: Date.now() - startTime,
+      };
+    }
+  }
+}
