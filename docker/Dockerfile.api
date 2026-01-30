@@ -1,0 +1,35 @@
+FROM oven/bun:1 AS builder
+WORKDIR /app
+
+# Copy package files
+COPY package.json bun.lockb* ./
+COPY apps/api/package.json ./apps/api/
+COPY packages/shared/package.json ./packages/shared/
+
+# Install dependencies
+RUN bun install --frozen-lockfile
+
+# Copy source
+COPY . .
+
+# Generate Prisma client
+RUN cd apps/api && bunx prisma generate
+
+# Build
+RUN bun run build --filter=api
+
+# Production image
+FROM oven/bun:1-slim
+WORKDIR /app
+
+# Copy built files
+COPY --from=builder /app/apps/api/dist ./dist
+COPY --from=builder /app/apps/api/package.json .
+COPY --from=builder /app/apps/api/prisma ./prisma
+COPY --from=builder /app/node_modules ./node_modules
+
+# Expose port
+EXPOSE 4000
+
+# Start server
+CMD ["bun", "run", "dist/index.js"]

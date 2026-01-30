@@ -1,0 +1,70 @@
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
+import { secureHeaders } from 'hono/secure-headers';
+import { serve } from '@hono/node-server';
+
+// Route imports
+import { authRoutes } from './routes/auth';
+import { sessionRoutes } from './routes/sessions';
+import { messageRoutes } from './routes/messages';
+
+const app = new Hono();
+
+// Middleware
+app.use('*', logger());
+app.use('*', secureHeaders());
+app.use(
+  '*',
+  cors({
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+    credentials: true,
+  })
+);
+
+// Health check
+app.get('/api/health', (c) => {
+  return c.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    version: '0.1.0',
+  });
+});
+
+// API Routes
+app.route('/api/auth', authRoutes);
+app.route('/api/sessions', sessionRoutes);
+app.route('/api', messageRoutes); // Messages are nested under sessions
+
+// 404 handler
+app.notFound((c) => {
+  return c.json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }, 404);
+});
+
+// Error handler
+app.onError((err, c) => {
+  console.error('Unhandled error:', err);
+  return c.json(
+    {
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
+      },
+    },
+    500
+  );
+});
+
+// Start server
+const port = Number(process.env.PORT) || 4000;
+
+console.log(`Starting server on port ${port}...`);
+
+serve({
+  fetch: app.fetch,
+  port,
+});
+
+console.log(`Server running at http://localhost:${port}`);
+
+export default app;

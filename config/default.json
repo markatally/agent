@@ -1,0 +1,87 @@
+{
+  "llm": {
+    "provider": "openai-compatible",
+    "baseUrl": "https://api.jiekou.ai/openai",
+    "model": "zai-org/glm-4.7",
+    "maxTokens": 131072,
+    "temperature": 0.7,
+    "timeout": 120000,
+    "streaming": true
+  },
+  "rateLimits": {
+    "enabled": false,
+    "requests": {
+      "perMinute": 60,
+      "perHour": 1000,
+      "perDay": 10000
+    },
+    "tokens": {
+      "perMinute": 100000,
+      "perHour": 1000000,
+      "perDay": 10000000
+    },
+    "concurrent": {
+      "maxSessions": 10,
+      "maxRequestsPerSession": 5
+    }
+  },
+  "sandbox": {
+    "enabled": true,
+    "memory": "512MB",
+    "cpu": "1",
+    "timeout": 300,
+    "diskSpace": "1GB",
+    "networkAccess": false
+  },
+  "session": {
+    "maxIdleTime": 3600,
+    "maxDuration": 86400,
+    "maxHistoryMessages": 100,
+    "contextWindowTokens": 128000
+  },
+  "tools": {
+    "enabled": [
+      "bash_executor",
+      "python_executor",
+      "file_reader",
+      "file_writer",
+      "web_search",
+      "web_scraper",
+      "code_analyzer",
+      "test_runner",
+      "git_operations"
+    ],
+    "requireApproval": [
+      "bash_executor",
+      "file_writer",
+      "git_operations"
+    ],
+    "timeout": {
+      "default": 30000,
+      "bash_executor": 60000,
+      "python_executor": 120000,
+      "web_scraper": 30000
+    }
+  },
+  "security": {
+    "maxFileUploadSize": "10MB",
+    "allowedFileTypes": [
+      ".txt", ".md", ".json", ".yaml", ".yml",
+      ".js", ".ts", ".py", ".go", ".rs", ".java",
+      ".html", ".css", ".sql", ".sh",
+      ".png", ".jpg", ".jpeg", ".gif", ".pdf"
+    ],
+    "blockedCommands": [
+      "rm -rf /",
+      "sudo",
+      "chmod 777",
+      "curl | bash",
+      "wget | bash"
+    ]
+  },
+  "logging": {
+    "level": "info",
+    "enableDebugMode": false,
+    "retentionDays": 30
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://claude.ai/schemas/hooks.json",
+  "description": "Hooks for automatic session management",
+  "hooks": {
+    "session_start": {
+      "description": "Read PROGRESS.md at session start",
+      "action": "read_file",
+      "file": "PROGRESS.md",
+      "instruction": "Review current status and pending tasks before proceeding"
+    },
+    "task_complete": {
+      "description": "Update PROGRESS.md when tasks complete",
+      "trigger": ["task completed", "phase complete", "milestone reached"],
+      "action": "update_progress"
+    },
+    "session_end": {
+      "description": "Save progress before session ends",
+      "trigger": ["ending session", "save progress", "taking a break", "goodbye", "bye"],
+      "action": "update_progress",
+      "instruction": "Update PROGRESS.md with current state before ending"
+    }
+  }
+}

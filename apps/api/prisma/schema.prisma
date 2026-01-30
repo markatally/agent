@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  sessions     Session[]
+  apiKeys      ApiKey[]
+  feedback     Feedback[]
+
+  @@map("users")
+}
+
+model Session {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  name          String?
+  workspacePath String?   @map("workspace_path")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  lastActiveAt  DateTime  @default(now()) @map("last_active_at")
+  status        String    @default("active")
+
+  user          User      @relation(fields: [userId], references: [id])
+  messages      Message[]
+  toolCalls     ToolCall[]
+  files         File[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([lastActiveAt(sort: Desc)])
+  @@map("sessions")
+}
+
+model Message {
+  id        String    @id @default(uuid())
+  sessionId String    @map("session_id")
+  role      String
+  content   String
+  metadata  Json?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  session   Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  toolCalls ToolCall[]
+  feedback  Feedback[]
+
+  @@index([sessionId])
+  @@index([createdAt(sort: Desc)])
+  @@map("messages")
+}
+
+model ToolCall {
+  id         String    @id @default(uuid())
+  sessionId  String    @map("session_id")
+  messageId  String?   @map("message_id")
+  toolName   String    @map("tool_name")
+  parameters Json
+  result     Json?
+  status     String
+  durationMs Int?      @map("duration_ms")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  session    Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  message    Message?  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([messageId])
+  @@index([status])
+  @@map("tool_calls")
+}
+
+model File {
+  id        String    @id @default(uuid())
+  sessionId String    @map("session_id")
+  filename  String
+  filepath  String
+  sizeBytes BigInt?   @map("size_bytes")
+  mimeType  String?   @map("mime_type")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  session   Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("files")
+}
+
+model ApiKey {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  service      String
+  encryptedKey String    @map("encrypted_key")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, service])
+  @@map("api_keys")
+}
+
+model Feedback {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  messageId String    @map("message_id")
+  rating    Int
+  comment   String?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("feedback")
+}
