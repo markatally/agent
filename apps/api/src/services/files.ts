@@ -72,6 +72,8 @@ function getMimeType(filename: string): string {
     '.jpeg': 'image/jpeg',
     '.gif': 'image/gif',
     '.pdf': 'application/pdf',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   };
   return mimeTypes[ext] || 'application/octet-stream';
 }

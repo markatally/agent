@@ -19,6 +19,8 @@ export interface Artifact {
   name: string;
   content: string | Buffer;
   mimeType?: string;
+  fileId?: string; // Database file ID for downloadable files
+  size?: number; // File size in bytes
 }
 
 /**

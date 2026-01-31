@@ -8,6 +8,12 @@ import {
   generateTokenPair,
   verifyToken,
 } from '../services/auth';
+import {
+  generateState,
+  getGoogleAuthorizationUrl,
+  exchangeGoogleCode,
+  completeGoogleLogin,
+} from '../services/oauth';
 
 const auth = new Hono();
 
@@ -180,6 +186,130 @@ auth.post('/refresh', zValidator('json', refreshSchema), async (c) => {
         error: {
           code: 'INVALID_TOKEN',
           message: 'Invalid or expired refresh token',
+        },
+      },
+      401
+    );
+  }
+});
+
+/**
+ * GET /api/auth/google/authorize
+ * Start Google OAuth flow - redirects to Google's authorization page
+ */
+auth.get('/google/authorize', async (c) => {
+  const result = getGoogleAuthorizationUrl();
+
+  if (!result) {
+    return c.json(
+      {
+        error: {
+          code: 'OAUTH_NOT_CONFIGURED',
+          message: 'Google OAuth is not configured',
+        },
+      },
+      500
+    );
+  }
+
+  // Store state in cookie for callback validation
+  c.header('Set-Cookie', `oauth_state=${result.state}; Path=/; HttpOnly; SameSite=Lax`);
+
+  // Return HTTP 302 redirect to Google's OAuth page
+  return c.redirect(result.url);
+});
+
+/**
+ * GET /api/auth/google/callback
+ * Handle Google OAuth callback - redirects to frontend after successful authentication
+ * Query params: code, state
+ */
+auth.get('/google/callback', async (c) => {
+  const { code, state } = c.req.query();
+
+  if (!code) {
+    return c.json(
+      {
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Authorization code is required',
+        },
+      },
+      400
+    );
+  }
+
+  if (!state) {
+    return c.json(
+      {
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'State parameter is required',
+        },
+      },
+      400
+    );
+  }
+
+  try {
+    // Exchange code for user info
+    const googleUser = await exchangeGoogleCode(code, state);
+
+    // Complete login and get tokens
+    const result = await completeGoogleLogin(googleUser);
+
+    // Redirect to frontend with tokens as URL hash fragment (more secure than query params)
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const tokenData = encodeURIComponent(JSON.stringify(result));
+    return c.redirect(`${frontendUrl}/auth/success#${tokenData}`);
+  } catch (error) {
+    console.error('Google OAuth error:', error);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const errorMessage = encodeURIComponent(error instanceof Error ? error.message : 'OAuth authentication failed');
+    return c.redirect(`${frontendUrl}/auth/error?message=${errorMessage}`);
+  }
+});
+
+const callbackSchema = z.object({
+  code: z.string().min(1, 'Authorization code is required'),
+  state: z.string().min(1, 'State is required'),
+});
+
+/**
+ * POST /api/auth/google/callback
+ * Handle Google OAuth callback
+ * Body: { code: string, state: string }
+ */
+auth.post('/google/callback', zValidator('json', callbackSchema), async (c) => {
+  const { code, state } = c.req.valid('json');
+
+  if (!state) {
+    return c.json(
+      {
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'State parameter is required',
+        },
+      },
+      400
+    );
+  }
+
+  try {
+    // Exchange code for user info
+    const googleUser = await exchangeGoogleCode(code, state);
+
+    // Complete login and get tokens
+    const result = await completeGoogleLogin(googleUser);
+
+    return c.json(result);
+  } catch (error) {
+    console.error('Google OAuth error:', error);
+    return c.json(
+      {
+        error: {
+          code: 'OAUTH_ERROR',
+          message: error instanceof Error ? error.message : 'OAuth authentication failed',
         },
       },
       401

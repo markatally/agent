@@ -1,12 +1,12 @@
 import { create } from 'zustand';
-import type { Message } from '@manus/shared';
+import type { Message, ToolResult, Artifact } from '@manus/shared';
 
 interface ToolCallStatus {
   toolCallId: string;
   toolName: string;
   params: any;
   status: 'pending' | 'running' | 'completed' | 'failed';
-  result?: string;
+  result?: ToolResult;
   error?: string;
 }
 
@@ -37,7 +37,7 @@ interface ChatState {
   // Actions - Tool calls
   startToolCall: (toolCallId: string, toolName: string, params: any) => void;
   updateToolCall: (toolCallId: string, updates: Partial<ToolCallStatus>) => void;
-  completeToolCall: (toolCallId: string, result: string, success: boolean) => void;
+  completeToolCall: (toolCallId: string, result: ToolResult) => void;
   clearToolCalls: () => void;
 }
 
@@ -157,16 +157,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // Complete a tool call
-  completeToolCall: (toolCallId: string, result: string, success: boolean) => {
+  completeToolCall: (toolCallId: string, result: ToolResult) => {
     set((state) => {
       const newToolCalls = new Map(state.toolCalls);
       const existing = newToolCalls.get(toolCallId);
       if (existing) {
         newToolCalls.set(toolCallId, {
           ...existing,
-          status: success ? 'completed' : 'failed',
-          result: success ? result : undefined,
-          error: success ? undefined : result,
+          status: result.success ? 'completed' : 'failed',
+          result: result.success ? result : undefined,
+          error: result.success ? undefined : result.error,
         });
       }
       return { toolCalls: newToolCalls };

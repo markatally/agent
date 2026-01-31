@@ -53,21 +53,24 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
 
       case 'tool.complete':
         if (event.data) {
-          completeToolCall(
-            event.data.toolCallId,
-            event.data.result,
-            true
-          );
+          const toolResult: import('@manus/shared').ToolResult = {
+            success: true,
+            output: event.data.result || '',
+            duration: event.data.duration || 0,
+          };
+          completeToolCall(event.data.toolCallId, toolResult);
         }
         break;
 
       case 'tool.error':
         if (event.data) {
-          completeToolCall(
-            event.data.toolCallId,
-            event.data.error,
-            false
-          );
+          const toolResult: import('@manus/shared').ToolResult = {
+            success: false,
+            output: '',
+            error: event.data.error || 'Unknown error',
+            duration: event.data.duration || 0,
+          };
+          completeToolCall(event.data.toolCallId, toolResult);
         }
         break;
 

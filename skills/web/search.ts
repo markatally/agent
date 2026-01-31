@@ -1,60 +1,91 @@
 import { Skill } from '../index';
 
 export const searchSkill: Skill = {
-  name: 'search',
-  description: 'Search the web for information',
-  aliases: ['google', 'lookup', 'find-info'],
+  name: 'web_search',
+  description: 'Search academic papers from arXiv, alphaXiv, and Google Scholar. Returns normalized metadata (title, authors, date, venue, link, summary) for research and PPT generation.',
+  aliases: ['academic', 'papers', 'scholar', 'research', 'arxiv', 'alphaxiv'],
   category: 'web',
-  requiredTools: ['web_search', 'web_scraper'],
+  requiredTools: ['web_search'],
   parameters: [
     {
       name: 'query',
-      description: 'Search query',
+      description: 'Search query for finding papers',
       required: true,
       type: 'string',
     },
     {
-      name: 'depth',
-      description: 'Search depth: quick, normal, thorough',
+      name: 'sources',
+      description: 'Sources to search: arxiv, alphaxiv, google_scholar, or all (default: all)',
       required: false,
       type: 'string',
-      default: 'normal',
+      default: 'all',
+    },
+    {
+      name: 'topK',
+      description: 'Number of results to return per source (default: 5, max: 20)',
+      required: false,
+      type: 'number',
+      default: 5,
+    },
+    {
+      name: 'dateRange',
+      description: 'Date range filter (e.g., "2020-2024", "last-5-years", "last-12-months")',
+      required: false,
+      type: 'string',
+    },
+    {
+      name: 'sortBy',
+      description: 'Sort order: relevance, date, or citations (default: relevance)',
+      required: false,
+      type: 'string',
+      default: 'relevance',
     },
   ],
-  systemPrompt: `You are a research assistant. Your task is to find accurate, relevant information from the web.
+  systemPrompt: `You are an academic research assistant. Your task is to find relevant academic papers and research materials for users.
 
 Search strategy:
-1. Formulate effective search queries
-2. Evaluate source credibility
-3. Cross-reference multiple sources
-4. Synthesize findings
-5. Cite sources properly
+1. Formulate effective search queries based on the topic
+2. Use multiple sources when appropriate (arXiv for CS/ML, alphaXiv for AI papers)
+3. Evaluate paper relevance based on title, abstract, and date
+4. Prioritize recent, high-impact papers
+5. Consider citation counts when available
 
-Source evaluation:
-- Authority: Who wrote it?
-- Accuracy: Is it factually correct?
-- Currency: Is it up-to-date?
-- Coverage: Does it fully address the topic?
-- Objectivity: Is there bias?
+Paper evaluation criteria:
+- Relevance: Does the paper directly address the topic?
+- Recency: Is the paper recent enough for the topic?
+- Quality: Is it published in a reputable venue?
+- Citations: Does it have reasonable citation counts?
+- Accessibility: Is full text available?
 
-Output format:
-1. Summary of findings
-2. Key facts/data points
-3. Source citations
-4. Confidence level
-5. Gaps in available information`,
+For PPT generation context:
+- Extract key contributions and findings
+- Identify main authors and their affiliations
+- Note publication venue and year
+- Summarize methodology if applicable
+- Highlight significant results
+`,
 
-  userPromptTemplate: `Search for:
+  userPromptTemplate: `Search for academic papers on the following topic:
 
-Query: {query}
-Depth: {depth}
+Topic: {query}
+Sources: {sources || 'all'}
+Results per source: {topK || 5}
+Date range: {dateRange || 'all time'}
+Sort by: {sortBy || 'relevance'}
 
 {userInput}
 
 Please:
-1. Search for relevant information
-2. Evaluate source quality
-3. Extract key findings
-4. Synthesize into coherent summary
-5. Cite all sources`,
+1. Execute web_search with the specified parameters
+2. Review results and identify the most relevant papers
+3. Summarize key findings from the top 3-5 papers
+4. Organize results by relevance and recency
+5. Highlight papers that would be good sources for a PPT presentation
+6. Provide a structured summary including:
+   - Paper title and authors
+   - Publication venue and date
+   - Key contributions (brief)
+   - Direct link to the paper
+7. Note any limitations or gaps in the search results
+`,
 };

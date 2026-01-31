@@ -221,30 +221,30 @@ describe('chatStore', () => {
     it('should update tool call', () => {
       const { startToolCall, updateToolCall } = useChatStore.getState();
       startToolCall('tool-1', 'read_file', { path: '/test.txt' });
-      updateToolCall('tool-1', { status: 'completed', result: 'File contents' });
+      updateToolCall('tool-1', { status: 'completed', result: { success: true, output: 'File contents', duration: 0 } });
 
       const state = useChatStore.getState();
       const toolCall = state.toolCalls.get('tool-1');
       expect(toolCall?.status).toBe('completed');
-      expect(toolCall?.result).toBe('File contents');
+      expect(toolCall?.result?.output).toBe('File contents');
     });
 
     it('should complete a tool call successfully', () => {
       const { startToolCall, completeToolCall } = useChatStore.getState();
       startToolCall('tool-1', 'read_file', { path: '/test.txt' });
-      completeToolCall('tool-1', 'File contents here', true);
+      completeToolCall('tool-1', { success: true, output: 'File contents here', duration: 100 });
 
       const state = useChatStore.getState();
       const toolCall = state.toolCalls.get('tool-1');
       expect(toolCall?.status).toBe('completed');
-      expect(toolCall?.result).toBe('File contents here');
+      expect(toolCall?.result?.output).toBe('File contents here');
       expect(toolCall?.error).toBeUndefined();
     });
 
     it('should handle tool call error', () => {
       const { startToolCall, completeToolCall } = useChatStore.getState();
       startToolCall('tool-1', 'read_file', { path: '/missing.txt' });
-      completeToolCall('tool-1', 'File not found', false);
+      completeToolCall('tool-1', { success: false, output: '', error: 'File not found', duration: 50 });
 
       const state = useChatStore.getState();
       const toolCall = state.toolCalls.get('tool-1');

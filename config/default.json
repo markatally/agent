@@ -70,6 +70,7 @@
       "python_executor",
       "file_reader",
       "file_writer",
+      "ppt_generator",
       "web_search",
       "web_scraper",
       "code_analyzer",
@@ -94,7 +95,8 @@
       ".txt", ".md", ".json", ".yaml", ".yml",
       ".js", ".ts", ".py", ".go", ".rs", ".java",
       ".html", ".css", ".sql", ".sh",
-      ".png", ".jpg", ".jpeg", ".gif", ".pdf"
+      ".png", ".jpg", ".jpeg", ".gif", ".pdf",
+      ".pptx", ".xlsx"
     ],
     "blockedCommands": [
       "rm -rf /",

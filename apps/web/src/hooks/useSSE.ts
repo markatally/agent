@@ -69,21 +69,25 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
 
           case 'tool.complete':
             if (event.data) {
-              completeToolCall(
-                event.data.toolCallId,
-                event.data.result,
-                true
-              );
+              const toolResult: import('@manus/shared').ToolResult = {
+                success: true,
+                output: event.data.result || '',
+                duration: event.data.duration || 0,
+                artifacts: event.data.artifacts,
+              };
+              completeToolCall(event.data.toolCallId, toolResult);
             }
             break;
 
           case 'tool.error':
             if (event.data) {
-              completeToolCall(
-                event.data.toolCallId,
-                event.data.error,
-                false
-              );
+              const toolResult: import('@manus/shared').ToolResult = {
+                success: false,
+                output: '',
+                error: event.data.error || 'Unknown error',
+                duration: event.data.duration || 0,
+              };
+              completeToolCall(event.data.toolCallId, toolResult);
             }
             break;
 

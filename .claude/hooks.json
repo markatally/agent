@@ -5,7 +5,7 @@
     "session_start": {
       "description": "Read PROGRESS.md at session start",
       "action": "read_file",
-      "file": "PROGRESS.md",
+      "file": ".claude/PROGRESS.md",
       "instruction": "Review current status and pending tasks before proceeding"
     },
     "task_complete": {

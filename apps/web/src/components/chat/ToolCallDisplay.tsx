@@ -6,6 +6,7 @@ import { Badge } from '../ui/badge';
 import { cn } from '../../lib/utils';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { ArtifactDisplay } from './ArtifactDisplay';
 
 interface ToolCallDisplayProps {
   sessionId: string;
@@ -93,14 +94,26 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
                   </SyntaxHighlighter>
                 </div>
 
-                {/* Result */}
-                {toolCall.result && (
+                {/* Artifacts */}
+                {toolCall.result?.artifacts && toolCall.result.artifacts.length > 0 && (
+                  <div>
+                    <div className="text-xs font-medium text-muted-foreground mb-1">
+                      Generated Files:
+                    </div>
+                    {toolCall.result.artifacts.map((artifact, idx) => (
+                      <ArtifactDisplay key={idx} artifact={artifact} sessionId={sessionId} />
+                    ))}
+                  </div>
+                )}
+
+                {/* Result (only show if no artifacts) */}
+                {toolCall.result && (!toolCall.result.artifacts || toolCall.result.artifacts.length === 0) && (
                   <div>
                     <div className="text-xs font-medium text-muted-foreground mb-1">
                       Result:
                     </div>
                     <pre className="text-xs bg-secondary p-2 rounded overflow-auto max-h-40">
-                      {toolCall.result}
+                      {toolCall.result.output}
                     </pre>
                   </div>
                 )}

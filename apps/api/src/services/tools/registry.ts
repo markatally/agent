@@ -3,6 +3,8 @@ import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import { FileReaderTool } from './file_reader';
 import { FileWriterTool } from './file_writer';
 import { BashExecutorTool } from './bash_executor';
+import { PptGeneratorTool } from './ppt_generator';
+import { WebSearchTool } from './web_search';
 import { bridgeAllMCPToolsSync } from '../mcp/bridge';
 
 /**
@@ -24,6 +26,8 @@ export class ToolRegistry {
     this.register(new FileReaderTool(this.context));
     this.register(new FileWriterTool(this.context));
     this.register(new BashExecutorTool(this.context));
+    this.register(new PptGeneratorTool(this.context));
+    this.register(new WebSearchTool(this.context));
   }
 
   /**

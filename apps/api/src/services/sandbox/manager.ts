@@ -21,38 +21,66 @@ const DEFAULT_IMAGE = 'manus-sandbox:latest';
  * Supports Docker Desktop, Colima, Podman, and standard Linux/macOS setups
  */
 function getDockerSocketOptions(): Docker.DockerOptions | undefined {
-  // Check DOCKER_HOST environment variable first
+  // Check Colima socket first on macOS (common setup)
+  const colimaSocket = `${process.env.HOME}/.colima/default/docker.sock`;
+  try {
+    const exists = fs.existsSync(colimaSocket);
+    console.log(`[Sandbox] Checking Colima socket: ${colimaSocket} -> ${exists ? 'FOUND' : 'not found'}`);
+    if (exists) {
+      console.log(`[Sandbox] Using Colima Docker socket: ${colimaSocket}`);
+      return { socketPath: colimaSocket };
+    }
+  } catch {
+    // Continue checking other paths
+  }
+
+  // Check DOCKER_HOST environment variable (but ignore if it points to /var/run/docker.sock on macOS)
   const dockerHost = process.env.DOCKER_HOST;
   if (dockerHost) {
+    console.log(`[Sandbox] DOCKER_HOST is set: ${dockerHost}`);
     if (dockerHost.startsWith('unix://')) {
-      return { socketPath: dockerHost.replace('unix://', '') };
+      const socketPath = dockerHost.replace('unix://', '');
+      // Don't use /var/run/docker.sock on macOS (Linux-only path)
+      if (process.platform === 'darwin' && socketPath === '/var/run/docker.sock') {
+        console.log(`[Sandbox] Ignoring DOCKER_HOST (${socketPath}) on macOS - checking for Colima...`);
+      } else {
+        console.log(`[Sandbox] Using custom socket: ${socketPath}`);
+        return { socketPath };
+      }
     }
     if (dockerHost.startsWith('tcp://')) {
       const url = new URL(dockerHost.replace('tcp://', 'http://'));
+      console.log(`[Sandbox] Using TCP: ${url.hostname}:${url.port || '2375'}`);
       return { host: url.hostname, port: parseInt(url.port || '2375', 10) };
     }
   }
 
-  // Common socket locations to check
+  // Other common socket locations
   const socketPaths = [
-    '/var/run/docker.sock', // Standard Linux/Docker Desktop
-    `${process.env.HOME}/.colima/default/docker.sock`, // Colima default
-    `${process.env.HOME}/.docker/run/docker.sock`, // Docker Desktop newer versions
+    `${process.env.HOME}/.docker/run/docker.sock`, // Docker Desktop newer versions (macOS/Windows)
+    '/var/run/docker.sock', // Standard Linux (skip on macOS, handled above)
+    `${process.env.HOME}/Library/Containers/com.docker.docker/Data/raw.sock`, // Docker Desktop (older macOS)
     '/run/docker.sock', // Some Linux distros
-    `${process.env.HOME}/.local/share/containers/podman/machine/podman.sock`, // Podman
+    `${process.env.HOME}/local/share/containers/podman/machine/podman.sock`, // Podman
   ];
 
   for (const socketPath of socketPaths) {
     try {
-      if (fs.existsSync(socketPath)) {
+      const exists = fs.existsSync(socketPath);
+      console.log(`[Sandbox] Checking socket: ${socketPath} -> ${exists ? 'FOUND' : 'not found'}`);
+      if (exists) {
+        console.log(`[Sandbox] Using Docker socket: ${socketPath}`);
         return { socketPath };
       }
-    } catch {
+    } catch (error) {
+      console.log(`[Sandbox] Error checking ${socketPath}:`, error);
       // Continue checking other paths
     }
   }
 
   // Return undefined to let dockerode use its defaults
+  console.warn('[Sandbox] No Docker socket found. Dockerode will use TCP defaults (http://localhost).');
+  console.warn('[Sandbox] Tip: Set DOCKER_HOST=unix:///path/to/docker.sock to specify socket path.');
   return undefined;
 }
 

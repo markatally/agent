@@ -199,6 +199,40 @@ export const authApi = {
   logout() {
     clearTokens();
   },
+
+  /**
+   * Get Google OAuth authorization URL
+   * Redirects user to Google's consent page
+   */
+  getGoogleAuthUrl(redirectUri?: string): string {
+    const params = new URLSearchParams();
+    if (redirectUri) {
+      params.append('redirect_uri', redirectUri);
+    }
+    return `${API_BASE_URL}/auth/google/authorize?${params.toString()}`;
+  },
+
+  /**
+   * Handle Google OAuth callback
+   * Called when user returns from Google's consent page
+   */
+  async handleGoogleCallback(code: string, state: string): Promise<{
+    user: User;
+    accessToken: string;
+    refreshToken: string;
+  }> {
+    const response = await apiFetch<{
+      user: User;
+      accessToken: string;
+      refreshToken: string;
+    }>('/auth/google/callback', {
+      method: 'POST',
+      body: JSON.stringify({ code, state }),
+    });
+
+    setTokens(response.accessToken, response.refreshToken);
+    return response;
+  },
 };
 
 // Sessions API

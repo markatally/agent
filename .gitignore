@@ -13,6 +13,13 @@ out/
 .env
 .env.local
 .env.*.local
+.env.bak
+
+# OAuth credentials (GitHub, etc.)
+*.client_secret.json
+
+# Scripts env (symlink to root .env)
+scripts/.env
 
 # IDE
 .vscode/

@@ -15,9 +15,11 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Script directory
+# Script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Change to project root
+cd "$PROJECT_ROOT" || exit 1
 
 # Parse arguments
 BUILD_SANDBOX=false
@@ -195,13 +197,13 @@ if $RESET_DB; then
   echo -e "${YELLOW}  Resetting database...${NC}"
   cd apps/api
   bunx prisma migrate reset --force
-  cd "$SCRIPT_DIR"
+  cd "$PROJECT_ROOT"
 else
   echo -e "${YELLOW}  Running database migrations...${NC}"
   cd apps/api
   bunx prisma migrate deploy 2>/dev/null || bunx prisma migrate dev --name init
   bunx prisma generate
-  cd "$SCRIPT_DIR"
+  cd "$PROJECT_ROOT"
 fi
 
 echo -e "${GREEN}  ✓ Dependencies installed and database migrated${NC}"
@@ -225,9 +227,9 @@ lsof -ti:3000 | xargs kill -9 2>/dev/null || true
 # Start backend in background
 echo -e "${YELLOW}  Starting backend API...${NC}"
 cd apps/api
-CONFIG_PATH="$SCRIPT_DIR/config/default.json" bun run dev &
+CONFIG_PATH="$PROJECT_ROOT/config/default.json" bun run dev &
 BACKEND_PID=$!
-cd "$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 
 # Wait for backend to start
 sleep 3
@@ -237,7 +239,7 @@ echo -e "${YELLOW}  Starting frontend...${NC}"
 cd apps/web
 bun run dev &
 FRONTEND_PID=$!
-cd "$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 
 # Wait for frontend to start
 sleep 3

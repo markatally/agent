@@ -1,6 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { OAuthCallbackPage } from './pages/OAuthCallbackPage';
+import { OAuthSuccessPage } from './pages/OAuthSuccessPage';
+import { OAuthErrorPage } from './pages/OAuthErrorPage';
 import { ChatPage } from './pages/ChatPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -16,6 +19,9 @@ function App() {
             {/* Public routes */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/auth/google/callback" element={<OAuthCallbackPage />} />
+            <Route path="/auth/success" element={<OAuthSuccessPage />} />
+            <Route path="/auth/error" element={<OAuthErrorPage />} />
 
             {/* Protected routes */}
             <Route
