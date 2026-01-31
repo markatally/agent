@@ -5,7 +5,7 @@ export interface StreamEvent {
         'tool.start' | 'tool.progress' | 'tool.complete' | 'tool.error' |
         'plan.created' | 'plan.step.start' | 'plan.step.complete' |
         'approval.required' | 'file.created' | 'file.modified' | 'file.deleted' |
-        'error' | 'session.end';
+        'error' | 'session.end' | 'agent.step_limit';
   data: any;
 }
 

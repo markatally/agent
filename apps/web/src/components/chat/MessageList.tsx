@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { useSessionMessages } from '../../hooks/useChat';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageItem } from './MessageItem';
 import { ScrollArea } from '../ui/scroll-area';
 import { Skeleton } from '../ui/skeleton';
+import { ApiError } from '../../lib/api';
 
 interface MessageListProps {
   sessionId: string;
@@ -16,6 +17,17 @@ export function MessageList({ sessionId }: MessageListProps) {
   const streamingContent = useChatStore((state) => state.streamingContent);
   const isStreaming = useChatStore((state) => state.isStreaming);
   const streamingSessionId = useChatStore((state) => state.streamingSessionId);
+
+  // Determine error type for better display
+  const errorType = error instanceof ApiError ? {
+    is404: error.status === 404,
+    isUnauthorized: error.status === 401,
+    message: error.message,
+  } : {
+    is404: false,
+    isUnauthorized: false,
+    message: error instanceof Error ? error.message : 'Unknown error',
+  };
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -43,10 +55,15 @@ export function MessageList({ sessionId }: MessageListProps) {
   if (error) {
     return (
       <div className="flex flex-1 items-center justify-center p-4">
-        <div className="text-center">
-          <p className="text-sm text-muted-foreground">Failed to load messages</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {(error as Error).message}
+        <div className="text-center max-w-md">
+          <div className="mb-4 flex justify-center">
+            <AlertCircle className="h-12 w-12 text-destructive" />
+          </div>
+          <h2 className="text-lg font-semibold mb-2">
+            {errorType.is404 ? 'Session Not Found' : 'Failed to Load Messages'}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {errorType.message}
           </p>
         </div>
       </div>

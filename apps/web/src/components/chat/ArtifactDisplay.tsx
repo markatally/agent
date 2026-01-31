@@ -2,6 +2,7 @@ import { FileText, FileImage, FileCode, Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import type { Artifact } from '@manus/shared';
+import { filesApi } from '../../lib/api';
 
 interface ArtifactDisplayProps {
   artifact: Artifact;
@@ -35,16 +36,6 @@ function formatFileSize(bytes?: number): string {
 }
 
 /**
- * Get download URL for file artifact
- */
-function getDownloadUrl(sessionId: string, fileId?: string): string {
-  if (fileId) {
-    return `/api/sessions/${sessionId}/files/${fileId}/download`;
-  }
-  return '#';
-}
-
-/**
  * Handle file download with proper error handling
  * Uses fetch + blob to ensure the file is properly downloaded
  */
@@ -62,16 +53,10 @@ async function handleDownload(
   }
 
   try {
-    const url = getDownloadUrl(sessionId, fileId);
-    const response = await fetch(url);
+    // Use authenticated API call to include auth headers
+    const blob = await filesApi.download(sessionId, fileId);
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error?.message || 'Download failed');
-    }
-
-    // Get blob and create download URL
-    const blob = await response.blob();
+    // Create download URL from blob
     const downloadUrl = URL.createObjectURL(blob);
 
     // Create temporary link and trigger download

@@ -6,25 +6,72 @@ This file tracks dynamic progress across Claude Code sessions. Update this file 
 
 ## Current Status
 
-**Last Updated:** 2026-01-31 (UTC+8)
-**Active Phase:** Phase 6 - Advanced Features + PPT Generation (ALL PHASES COMPLETE ✅🎉)
+**Last Updated:** 2026-01-31 15:45 UTC
+**Active Phase:** Phase 7 - Agent Orchestration Fixes (IN PROGRESS 🔄)
 **Blocked By:** None
 
-**All Tests Passing! 🎉** 217/217 tests (100%) - All backend, Phase 6, integration, and PPT tests validated.
-
-**Note:** LLM and tool features require `LLM_API_KEY` to be set in `.env` for live testing.
-
-### TODO for Next Session (Testing)
-- [ ] Test Docker sandbox bash execution (start API server and send bash command via UI)
-- [ ] Create workspace directory: `mkdir -p /tmp/manus-workspaces`
-- [ ] Verify Colima/Docker is running: `colima start`
-- [ ] Verify sandbox image exists: `docker images manus-sandbox`
+**Latest Fix: Tool-Call Livelock Resolved** ✅
+- Agent now continues reasoning after tool execution via continuation loop
+- Tool results fed back to LLM via `role: 'tool'` messages
+- Frontend timeout protection added (60s idle detection)
+- Step limits implemented (max 10, with `agent.step_limit` event)
 
 ---
 
 ## Sessions Log
 
-### Session 6 — 2026-01-30
+### Session 10 — 2026-01-31
+
+**Tool-Call Livelock Fix & Continuation Loop:**
+- ✅ Diagnosed critical bug: Agent stuck after tool execution - tool completes but no assistant response follows
+- ✅ Root cause: Single-pass LLM execution - tool results never fed back to LLM
+- ✅ Fixed `apps/api/src/routes/stream.ts`:
+  - Added `processAgentTurn()` function implementing continuation loop
+  - Added `AGENT_CONFIG` with step limits (maxToolSteps: 10, maxExecutionTime: 5min)
+  - Added `ExtendedLLMMessage` type supporting `role: 'tool'` and `tool_calls` fields
+  - Tool results added to message history as `role: 'tool'` messages
+  - LLM re-called with updated history until no more tools needed
+- ✅ Added `agent.step_limit` SSE event type for step limit exceeded
+- ✅ Fixed `apps/api/src/services/llm.ts` - Extended message types for tool calling
+- ✅ Fixed `apps/web/src/hooks/useSSE.ts`:
+  - Added 60s idle timeout protection
+  - Added `lastEventTimeRef` tracking
+  - Added `agent.step_limit` event handler
+- ✅ Fixed `apps/web/src/lib/sse.ts` - Extended `StreamEvent` type
+- ✅ All TypeScript diagnostics passing (no errors)
+
+**Files Modified:**
+| File | Action | Notes |
+|------|--------|-------|
+| `apps/api/src/services/llm.ts` | Updated | Added `ExtendedLLMMessage` interface |
+| `apps/api/src/routes/stream.ts` | Major refactor | Added `processAgentTurn()` continuation loop, step limits, new SSE event |
+| `apps/web/src/hooks/useSSE.ts` | Updated | Added idle timeout, `agent.step_limit` handler |
+| `apps/web/src/lib/sse.ts` | Updated | Extended `StreamEvent` type |
+
+**Code Pattern Applied:**
+```typescript
+// Continuation loop - tool results fed back to LLM:
+while (steps < maxSteps) {
+  // 1. Stream from LLM
+  for await (const chunk of llmClient.streamChat(messages, tools)) { ... }
+
+  // 2. If tool calls, execute and add results to history
+  if (hasToolCalls) {
+    messages.push({ role: 'assistant', content: null, tool_calls: [...] });
+    for (const result of toolResults) {
+      messages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: ... });
+    }
+    continue; // RECALL LLM with tool results
+  }
+
+  // 3. No tool calls = final answer
+  return { content, finishReason: 'stop' };
+}
+```
+
+---
+
+### Session 9 — 2026-01-31
 
 **Docker Sandbox Socket Fix:**
 - ✅ Diagnosed sandbox error: `FailedToOpenSocket` when trying to execute bash commands

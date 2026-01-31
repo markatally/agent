@@ -6,19 +6,26 @@ This file provides guidance for Claude Code when working with this repository.
 
 ### On Every Session Start
 ```
-1. READ PROGRESS.md immediately
+1. READ .claude/PROGRESS.md immediately (NOT root/PROGRESS.md)
 2. Report current status to user
 3. Ask if user wants to continue from where we left off
 ```
 
-### Auto-Update PROGRESS.md When:
+### ⚠️ IMPORTANT CONSTRAINTS
+| Constraint | Description |
+|-----------|-------------|
+| **Single PROGRESS.md** | ONLY `.claude/PROGRESS.md` exists. NEVER create `PROGRESS.md` in the project root. |
+| **No duplication** | If you accidentally create a root-level PROGRESS.md, delete it immediately after merging content. |
+| **Progress updates** | Always update `.claude/PROGRESS.md` directly, never create new copies. |
+
+### Auto-Update .claude/PROGRESS.md When:
 | Event | Action |
 |-------|--------|
 | Task completed | Mark task ✅, update status |
 | New blocker found | Add to "Blocked By" section |
 | Phase transition | Update "Active Phase" |
 | Error/failure | Log in "Notes for Next Session" |
-| User says "save/update/break/bye/done" | Full progress sync |
+| User says "save/update/break/bye/done" | Full progress sync to `.claude/PROGRESS.md` |
 
 ### Progress Update Format
 When updating, always include:

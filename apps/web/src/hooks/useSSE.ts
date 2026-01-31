@@ -12,7 +12,14 @@ interface UseSSEOptions {
 }
 
 /**
+ * Idle timeout configuration (in milliseconds)
+ * If no SSE events are received within this time, connection is considered stuck
+ */
+const IDLE_TIMEOUT = 60 * 1000; // 60 seconds
+
+/**
  * Hook to handle SSE streaming for a session
+ * Includes idle timeout protection to prevent infinite polling
  */
 export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOptions) {
   const clientRef = useRef<SSEClient | null>(null);
@@ -25,6 +32,7 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
   const addFileArtifact = useChatStore((state) => state.addFileArtifact);
   const stopStreaming = useChatStore((state) => state.stopStreaming);
   const finalizeStreamingMessage = useChatStore((state) => state.finalizeStreamingMessage);
+  const lastEventTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
     if (!enabled || !sessionId) return;
@@ -36,9 +44,32 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
     // Get stream URL with auth token
     const streamUrl = apiClient.chat.getStreamUrl(sessionId);
 
+    // Set up idle timeout detection
+    let idleTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const resetIdleTimeout = () => {
+      if (idleTimeoutId) {
+        clearTimeout(idleTimeoutId);
+      }
+      lastEventTimeRef.current = Date.now();
+
+      // Check for idle state after timeout period
+      idleTimeoutId = setTimeout(() => {
+        const elapsed = Date.now() - lastEventTimeRef.current;
+        if (elapsed > IDLE_TIMEOUT) {
+          console.error(`Agent idle timeout: no events for ${elapsed}ms`);
+          stopStreaming();
+          onError?.(new Error('Agent took too long to respond (idle timeout)'));
+        }
+      }, IDLE_TIMEOUT);
+    };
+
     // Connect to SSE stream
     const cleanup = client.connect(streamUrl, {
       onEvent: (event: StreamEvent) => {
+        // Reset idle timeout on any event
+        resetIdleTimeout();
+
         switch (event.type) {
           case 'message.start':
             startStreaming(sessionId);
@@ -117,6 +148,13 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
               };
               addFileArtifact(sessionId, artifact);
             }
+            break;
+
+          case 'agent.step_limit':
+            // Agent exceeded maximum tool steps
+            console.error('Agent step limit reached:', event.data?.reason);
+            stopStreaming();
+            onError?.(new Error(event.data?.reason || 'Agent exceeded step limit'));
             break;
 
           case 'error':

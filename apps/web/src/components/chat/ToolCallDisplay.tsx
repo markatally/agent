@@ -178,7 +178,7 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
                     <div className="text-xs font-medium text-muted-foreground mb-1">
                       Result:
                     </div>
-                    <pre className="text-xs bg-secondary p-2 rounded overflow-auto max-h-40">
+                    <pre className="text-xs bg-secondary p-2 rounded overflow-auto max-h-96">
                       {toolCall.result.output}
                     </pre>
                   </div>
@@ -198,7 +198,7 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
                     <div className="text-xs font-medium text-destructive mb-1">
                       Error:
                     </div>
-                    <pre className="text-xs bg-destructive/10 text-destructive p-2 rounded overflow-auto max-h-40">
+                    <pre className="text-xs bg-destructive/10 text-destructive p-2 rounded overflow-auto max-h-96">
                       {toolCall.error}
                     </pre>
                   </div>

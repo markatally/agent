@@ -454,8 +454,7 @@ stream.get('/sessions/:sessionId/stream', async (c) => {
   return streamSSE(c, async (sseStream) => {
     const llmClient = getLLMClient();
     const toolExecutor = getToolExecutor(toolContext);
-    let fullContent = '';
-    const toolCallsCollected: Array<{ id: string; name: string; arguments: string }> = [];
+    const startTime = Date.now();
 
     try {
       // Send message.start event
@@ -470,203 +469,61 @@ stream.get('/sessions/:sessionId/stream', async (c) => {
 
       // Build messages with task context
       const taskContext = taskManager.getSystemPromptContext(sessionId);
-      let messagesWithTaskContext = [...truncatedMessages];
+      const baseMessages: ExtendedLLMMessage[] = truncatedMessages.map(m => ({
+        role: m.role as 'system' | 'user' | 'assistant',
+        content: m.content,
+      }));
 
       // Add or update system prompt with task context
-      const systemIndex = messagesWithTaskContext.findIndex((m) => m.role === 'system');
+      const systemIndex = baseMessages.findIndex((m) => m.role === 'system');
       const baseSystemPrompt = 'You are a helpful AI assistant. Be concise and helpful.';
       const enhancedSystemPrompt = taskContext
         ? `${baseSystemPrompt}\n\n${taskContext}`
         : baseSystemPrompt;
 
       if (systemIndex >= 0) {
-        messagesWithTaskContext[systemIndex].content = enhancedSystemPrompt;
+        baseMessages[systemIndex].content = enhancedSystemPrompt;
       } else {
-        messagesWithTaskContext.unshift({
+        baseMessages.unshift({
           role: 'system',
           content: enhancedSystemPrompt,
         });
       }
 
-      // Stream the LLM response with tools
-      for await (const chunk of llmClient.streamChat(messagesWithTaskContext, tools)) {
-        if (chunk.type === 'content' && chunk.content) {
-          fullContent += chunk.content;
+      // Process agent turn with continuation loop
+      const result = await processAgentTurn(
+        sessionId,
+        baseMessages,
+        tools,
+        toolContext,
+        taskManager,
+        prisma,
+        llmClient,
+        toolExecutor,
+        sseStream,
+        startTime
+      );
 
-          await sseStream.writeSSE({
-            data: JSON.stringify({
-              type: 'message.delta',
-              sessionId,
-              timestamp: Date.now(),
-              data: { content: chunk.content },
-            }),
-          });
-        } else if (chunk.type === 'tool_call' && chunk.toolCall) {
-          // LLM wants to call a tool
-          const params = JSON.parse(chunk.toolCall.arguments || '{}');
+      // Save final assistant message to database
+      const assistantMessage = await prisma.message.create({
+        data: {
+          sessionId,
+          role: 'assistant',
+          content: result.content,
+          metadata: {
+            finishReason: result.finishReason,
+            model: llmClient.getModel(),
+            stepsTaken: result.stepsTaken,
+          },
+        },
+      });
 
-          // Check if tool call should be allowed (prevent redundant calls)
-          const toolCheck = taskManager.shouldAllowToolCall(
-            sessionId,
-            chunk.toolCall.name,
-            params
-          );
+      // Update session lastActiveAt
+      await prisma.session.update({
+        where: { id: sessionId },
+        data: { lastActiveAt: new Date() },
+      });
 
-          if (!toolCheck.allowed) {
-            // Send tool error with reason
-            await sseStream.writeSSE({
-              data: JSON.stringify({
-                type: 'tool.error',
-                sessionId,
-                timestamp: Date.now(),
-                data: {
-                  toolCallId: chunk.toolCall.id,
-                  toolName: chunk.toolCall.name,
-                  error: toolCheck.reason || 'Tool call not allowed',
-                },
-              }),
-            });
-            continue;
-          }
-
-          toolCallsCollected.push(chunk.toolCall);
-
-          await sseStream.writeSSE({
-            data: JSON.stringify({
-              type: 'tool.start',
-              sessionId,
-              timestamp: Date.now(),
-              data: {
-                toolCallId: chunk.toolCall.id,
-                toolName: chunk.toolCall.name,
-                params: params,
-              },
-            }),
-          });
-
-          // Execute the tool with progress callback
-          try {
-            const result = await toolExecutor.execute(chunk.toolCall.name, params, {
-              onProgress: async (current: number, total: number, message?: string) => {
-                // Send progress event
-                await sseStream.writeSSE({
-                  data: JSON.stringify({
-                    type: 'tool.progress',
-                    sessionId,
-                    timestamp: Date.now(),
-                    data: {
-                      toolCallId: chunk.toolCall.id,
-                      toolName: chunk.toolCall.name,
-                      current,
-                      total,
-                      message,
-                    },
-                  }),
-                });
-              },
-            });
-
-            // Record tool call with TaskManager
-            taskManager.recordToolCall(sessionId, chunk.toolCall.name, params, result);
-
-            // Save tool call to database
-            await prisma.toolCall.create({
-              data: {
-                sessionId,
-                toolName: chunk.toolCall.name,
-                parameters: params,
-                result: result,
-                status: result.success ? 'completed' : 'failed',
-                durationMs: result.duration,
-              },
-            });
-
-            // Emit file.created event for artifacts
-            if (result.success && result.artifacts && result.artifacts.length > 0) {
-              for (const artifact of result.artifacts) {
-                if (artifact.fileId) {
-                  await sseStream.writeSSE({
-                    data: JSON.stringify({
-                      type: 'file.created',
-                      sessionId,
-                      timestamp: Date.now(),
-                      data: {
-                        fileId: artifact.fileId,
-                        filename: artifact.name,
-                        mimeType: artifact.mimeType,
-                        size: artifact.size,
-                        type: artifact.type,
-                      },
-                    }),
-                  });
-                }
-              }
-            }
-
-            // Send tool completion event
-            await sseStream.writeSSE({
-              data: JSON.stringify({
-                type: result.success ? 'tool.complete' : 'tool.error',
-                sessionId,
-                timestamp: Date.now(),
-                data: {
-                  toolCallId: chunk.toolCall.id,
-                  toolName: chunk.toolCall.name,
-                  result: result.output,
-                  success: result.success,
-                  error: result.error,
-                  duration: result.duration,
-                },
-              }),
-            });
-          } catch (error) {
-            await sseStream.writeSSE({
-              data: JSON.stringify({
-                type: 'tool.error',
-                sessionId,
-                timestamp: Date.now(),
-                data: {
-                  toolCallId: chunk.toolCall.id,
-                  toolName: chunk.toolCall.name,
-                  error: error instanceof Error ? error.message : 'Tool execution failed',
-                },
-              }),
-            });
-          }
-        } else if (chunk.type === 'done') {
-          // Save the assistant message to database
-          const assistantMessage = await prisma.message.create({
-            data: {
-              sessionId,
-              role: 'assistant',
-              content: fullContent,
-              metadata: {
-                finishReason: chunk.finishReason,
-                model: llmClient.getModel(),
-              },
-            },
-          });
-
-          // Update session lastActiveAt
-          await prisma.session.update({
-            where: { id: sessionId },
-            data: { lastActiveAt: new Date() },
-          });
-
-          // Send message.complete event
-          await sseStream.writeSSE({
-            data: JSON.stringify({
-              type: 'message.complete',
-              sessionId,
-              timestamp: Date.now(),
-              data: {
-                messageId: assistantMessage.id,
-                finishReason: chunk.finishReason,
-              },
-            }),
-          });
-        }
-      }
     } catch (error) {
       console.error('Stream error:', error);
 
@@ -849,8 +706,7 @@ stream.post('/sessions/:sessionId/chat', async (c) => {
   return streamSSE(c, async (sseStream) => {
     const llmClient = getLLMClient();
     const toolExecutor = getToolExecutor(toolContext);
-    let fullContent = '';
-    const toolCallsCollected: Array<{ id: string; name: string; arguments: string }> = [];
+    const startTime = Date.now();
 
     try {
       // Send message.start event with user message ID
@@ -865,204 +721,74 @@ stream.post('/sessions/:sessionId/chat', async (c) => {
 
       // Build messages with task context
       const taskContext = taskManager.getSystemPromptContext(sessionId);
-      let messagesWithTaskContext = [...truncatedMessages];
+      const baseMessages: ExtendedLLMMessage[] = truncatedMessages.map(m => ({
+        role: m.role as 'system' | 'user' | 'assistant',
+        content: m.content,
+      }));
 
       // Add or update system prompt with task context
-      const systemIndex = messagesWithTaskContext.findIndex((m) => m.role === 'system');
+      const systemIndex = baseMessages.findIndex((m) => m.role === 'system');
       const baseSystemPrompt = 'You are a helpful AI assistant. Be concise and helpful.';
       const enhancedSystemPrompt = taskContext
         ? `${baseSystemPrompt}\n\n${taskContext}`
         : baseSystemPrompt;
 
       if (systemIndex >= 0) {
-        messagesWithTaskContext[systemIndex].content = enhancedSystemPrompt;
+        baseMessages[systemIndex].content = enhancedSystemPrompt;
       } else {
-        messagesWithTaskContext.unshift({
+        baseMessages.unshift({
           role: 'system',
           content: enhancedSystemPrompt,
         });
       }
 
-      // Stream the LLM response with tools
-      for await (const chunk of llmClient.streamChat(messagesWithTaskContext, tools)) {
-        if (chunk.type === 'content' && chunk.content) {
-          fullContent += chunk.content;
+      // Process agent turn with continuation loop
+      const result = await processAgentTurn(
+        sessionId,
+        baseMessages,
+        tools,
+        toolContext,
+        taskManager,
+        prisma,
+        llmClient,
+        toolExecutor,
+        sseStream,
+        startTime
+      );
 
-          await sseStream.writeSSE({
-            data: JSON.stringify({
-              type: 'message.delta',
-              sessionId,
-              timestamp: Date.now(),
-              data: { content: chunk.content },
-            }),
-          });
-        } else if (chunk.type === 'tool_call' && chunk.toolCall) {
-          // LLM wants to call a tool
-          const params = JSON.parse(chunk.toolCall.arguments || '{}');
+      // Save final assistant message to database
+      const assistantMessage = await prisma.message.create({
+        data: {
+          sessionId,
+          role: 'assistant',
+          content: result.content,
+          metadata: {
+            finishReason: result.finishReason,
+            model: llmClient.getModel(),
+            stepsTaken: result.stepsTaken,
+          },
+        },
+      });
 
-          // Check if tool call should be allowed (prevent redundant calls)
-          const toolCheck = taskManager.shouldAllowToolCall(
-            sessionId,
-            chunk.toolCall.name,
-            params
-          );
+      // Update session lastActiveAt
+      await prisma.session.update({
+        where: { id: sessionId },
+        data: { lastActiveAt: new Date() },
+      });
 
-          if (!toolCheck.allowed) {
-            // Send tool error with reason
-            await sseStream.writeSSE({
-              data: JSON.stringify({
-                type: 'tool.error',
-                sessionId,
-                timestamp: Date.now(),
-                data: {
-                  toolCallId: chunk.toolCall.id,
-                  toolName: chunk.toolCall.name,
-                  error: toolCheck.reason || 'Tool call not allowed',
-                },
-              }),
-            });
-            continue;
-          }
-
-          toolCallsCollected.push(chunk.toolCall);
-
-          await sseStream.writeSSE({
-            data: JSON.stringify({
-              type: 'tool.start',
-              sessionId,
-              timestamp: Date.now(),
-              data: {
-                toolCallId: chunk.toolCall.id,
-                toolName: chunk.toolCall.name,
-                params: params,
-              },
-            }),
-          });
-
-          // Execute the tool with progress callback
-          try {
-            const result = await toolExecutor.execute(chunk.toolCall.name, params, {
-              onProgress: async (current: number, total: number, message?: string) => {
-                // Send progress event
-                await sseStream.writeSSE({
-                  data: JSON.stringify({
-                    type: 'tool.progress',
-                    sessionId,
-                    timestamp: Date.now(),
-                    data: {
-                      toolCallId: chunk.toolCall.id,
-                      toolName: chunk.toolCall.name,
-                      current,
-                      total,
-                      message,
-                    },
-                  }),
-                });
-              },
-            });
-
-            // Record tool call with TaskManager
-            taskManager.recordToolCall(sessionId, chunk.toolCall.name, params, result);
-
-            // Save tool call to database
-            await prisma.toolCall.create({
-              data: {
-                sessionId,
-                toolName: chunk.toolCall.name,
-                parameters: params,
-                result: result,
-                status: result.success ? 'completed' : 'failed',
-                durationMs: result.duration,
-              },
-            });
-
-            // Emit file.created event for artifacts
-            if (result.success && result.artifacts && result.artifacts.length > 0) {
-              for (const artifact of result.artifacts) {
-                if (artifact.fileId) {
-                  await sseStream.writeSSE({
-                    data: JSON.stringify({
-                      type: 'file.created',
-                      sessionId,
-                      timestamp: Date.now(),
-                      data: {
-                        fileId: artifact.fileId,
-                        filename: artifact.name,
-                        mimeType: artifact.mimeType,
-                        size: artifact.size,
-                        type: artifact.type,
-                      },
-                    }),
-                  });
-                }
-              }
-            }
-
-            // Send tool completion event
-            await sseStream.writeSSE({
-              data: JSON.stringify({
-                type: result.success ? 'tool.complete' : 'tool.error',
-                sessionId,
-                timestamp: Date.now(),
-                data: {
-                  toolCallId: chunk.toolCall.id,
-                  toolName: chunk.toolCall.name,
-                  result: result.output,
-                  success: result.success,
-                  error: result.error,
-                  duration: result.duration,
-                },
-              }),
-            });
-          } catch (error) {
-            await sseStream.writeSSE({
-              data: JSON.stringify({
-                type: 'tool.error',
-                sessionId,
-                timestamp: Date.now(),
-                data: {
-                  toolCallId: chunk.toolCall.id,
-                  toolName: chunk.toolCall.name,
-                  error: error instanceof Error ? error.message : 'Tool execution failed',
-                },
-              }),
-            });
-          }
-        } else if (chunk.type === 'done') {
-          // Save the assistant message to database
-          const assistantMessage = await prisma.message.create({
-            data: {
-              sessionId,
-              role: 'assistant',
-              content: fullContent,
-              metadata: {
-                finishReason: chunk.finishReason,
-                model: llmClient.getModel(),
-              },
-            },
-          });
-
-          // Update session lastActiveAt
-          await prisma.session.update({
-            where: { id: sessionId },
-            data: { lastActiveAt: new Date() },
-          });
-
-          // Send message.complete event
-          await sseStream.writeSSE({
-            data: JSON.stringify({
-              type: 'message.complete',
-              sessionId,
-              timestamp: Date.now(),
-              data: {
-                userMessageId: userMessage.id,
-                assistantMessageId: assistantMessage.id,
-                finishReason: chunk.finishReason,
-              },
-            }),
-          });
-        }
-      }
+      // Send message.complete event
+      await sseStream.writeSSE({
+        data: JSON.stringify({
+          type: 'message.complete',
+          sessionId,
+          timestamp: Date.now(),
+          data: {
+            userMessageId: userMessage.id,
+            assistantMessageId: assistantMessage.id,
+            finishReason: result.finishReason,
+          },
+        }),
+      });
     } catch (error) {
       console.error('Stream error:', error);
 

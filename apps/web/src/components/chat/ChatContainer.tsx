@@ -1,11 +1,13 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ToolCallDisplay } from './ToolCallDisplay';
 import { ArtifactDisplay } from './ArtifactDisplay';
-import { apiClient, type SSEEvent } from '../../lib/api';
+import { apiClient, type SSEEvent, ApiError } from '../../lib/api';
 import { useChatStore } from '../../stores/chatStore';
+import { useSession } from '../../hooks/useSessions';
 import { useToast } from '../../hooks/use-toast';
 
 interface ChatContainerProps {
@@ -16,7 +18,12 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
   const [isSending, setIsSending] = useState(false);
   const [files, setFiles] = useState<import('@manus/shared').Artifact[]>([]);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { toast } = useToast();
+
+  // Verify session exists before allowing any operations
+  const { data: session, isLoading: isSessionLoading, error: sessionError } = useSession(sessionId);
+  const isSessionValid = !!session && !sessionError;
 
   const addMessage = useChatStore((state) => state.addMessage);
   const startStreaming = useChatStore((state) => state.startStreaming);
@@ -104,6 +111,16 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
   };
 
   const handleSendMessage = async (content: string) => {
+    // Guard: Do not allow sending if session is invalid
+    if (!isSessionValid) {
+      toast({
+        title: 'Session not found',
+        description: 'This session does not exist or has been deleted. Please create a new session or select an existing one from the sidebar.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsSending(true);
 
     try {
@@ -137,11 +154,46 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
     }
   };
 
+  // Redirect to chat list if session doesn't exist or failed to load
+  if (sessionError || (!isSessionLoading && !session)) {
+    const error = sessionError as Error;
+    const is404 = error instanceof ApiError && error.status === 404;
+
+    return (
+      <div className="flex flex-1 items-center justify-center p-4">
+        <div className="text-center max-w-md">
+          <div className="mb-4 flex justify-center">
+            <svg className="mx-auto h-12 w-12 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0m-6 0v6m0-6v6m6 0a3 3 0 01-6 0V4a3 3 0 016 0v2a3 3 0 016 0v2a3 3 0 01-6 0zm-9-3v6h-9" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-semibold mb-2">
+            {is404 ? 'Session Not Found' : 'Unable to Load Session'}
+          </h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            {is404
+              ? 'The session you are looking for does not exist or has been deleted.'
+              : 'There was an error loading the session.'}
+          </p>
+          <button
+            onClick={() => navigate('/chat')}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7l7-7" />
+            </svg>
+            Go to Sessions
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 flex-col overflow-y-auto">
       <MessageList sessionId={sessionId} />
       <ToolCallDisplay sessionId={sessionId} />
-      <ChatInput onSend={handleSendMessage} disabled={isSending} />
+      <ChatInput onSend={handleSendMessage} disabled={isSending || !isSessionValid} />
 
       {/* Display generated files independently */}
       {files.length > 0 && (

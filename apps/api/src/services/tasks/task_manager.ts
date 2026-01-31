@@ -21,8 +21,8 @@ import { generateId } from '../../utils/id';
 export class TaskManager {
   private state: Map<string, TaskState> = new Map();
   private toolCallHistory: Map<string, ToolCallHistory[]> = new Map();
-  private readonly MAX_SEARCH_CALLS = 3;
-  private readonly SEARCH_COOLDOWN_MS = 30000; // 30 seconds
+  // Treat web_search as high-cost tool - allow at most ONE call per task
+  private readonly MAX_SEARCH_CALLS = 1;
 
   /**
    * Initialize a task for a session
@@ -223,43 +223,18 @@ export class TaskManager {
       return { allowed: true };
     }
 
-    // Check for repeated web_search calls
+    // Check for repeated web_search calls - allow at most ONE per task
     if (toolName === 'web_search') {
-      const recentSearchCalls = history.filter(
+      const previousSearchCalls = history.filter(
         (call) => call.toolName === 'web_search'
       );
 
-      // Count calls in last minute
-      const oneMinuteAgo = new Date(Date.now() - 60000);
-      const callsInLastMinute = recentSearchCalls.filter(
-        (call) => call.timestamp > oneMinuteAgo
-      );
-
-      if (callsInLastMinute.length >= this.MAX_SEARCH_CALLS) {
+      // Block if web_search was already called for this task
+      if (previousSearchCalls.length >= this.MAX_SEARCH_CALLS) {
         return {
           allowed: false,
-          reason: `Too many web_search calls (${callsInLastMinute.length} in last minute). Please work with existing results or ask the user for clarification.`,
+          reason: `web_search has already been called once for this task. Use existing search results to continue with PPT generation. If you need different information, ask user for clarification instead of searching again.`,
         };
-      }
-
-      // Check for duplicate queries
-      const query = parameters.query || '';
-      const duplicateCall = recentSearchCalls.find(
-        (call) => call.parameters.query === query
-      );
-
-      if (duplicateCall) {
-        const timeSinceDuplicate =
-          Date.now() - duplicateCall.timestamp.getTime();
-
-        if (timeSinceDuplicate < this.SEARCH_COOLDOWN_MS) {
-          return {
-            allowed: false,
-            reason: `Already searched for "${query}" recently (${Math.round(
-              timeSinceDuplicate / 1000
-            )}s ago). Please use existing results.`,
-          };
-        }
       }
     }
 
@@ -504,9 +479,11 @@ export class TaskManager {
 
     context += `\nINSTRUCTIONS:\n`;
     context += `- Complete the task efficiently without redundant tool calls\n`;
-    context += `- When PPT is generated, the task is COMPLETE\n`;
+    context += `- When PPT is generated, the task is COMPLETE - report completion to user\n`;
     context += `- When user asks about progress, report current state WITHOUT making new tool calls\n`;
-    context += `- Only call web_search if truly necessary and not recently done\n`;
+    context += `- web_search is a high-cost tool: call it AT MOST ONCE per task\n`;
+    context += `- After searching, immediately proceed to PPT generation using existing results\n`;
+    context += `- If search results are insufficient, ask user for clarification instead of re-searching\n`;
 
     return context;
   }
