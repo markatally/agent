@@ -181,11 +181,21 @@ export class WebSearchTool implements Tool {
         usedFallback
       );
 
+      // Return result with proper error message when no results found
+      if (allResults.length === 0) {
+        return {
+          success: false,
+          output,
+          error: `No papers found for query "${query}". Try broader search terms, remove date filters, or check spelling.`,
+          duration: Date.now() - startTime,
+        };
+      }
+
       return {
-        success: allResults.length > 0,
+        success: true,
         output,
         duration: Date.now() - startTime,
-        artifacts: allResults.length > 0 ? [{
+        artifacts: [{
           type: 'data',
           name: 'search-results.json',
           content: JSON.stringify({
@@ -199,7 +209,7 @@ export class WebSearchTool implements Tool {
             results: allResults,
           }, null, 2),
           mimeType: 'application/json',
-        }] : undefined,
+        }],
       };
     } catch (error: any) {
       return {
@@ -400,7 +410,7 @@ export class WebSearchTool implements Tool {
 
         if (titleMatch && idMatch) {
           const title = this.stripHtml(titleMatch[1]);
-          const authors = authorMatches.map(m => this.stripHtml(m[1])).filter(a => a.trim());
+          const authors = Array.from(authorMatches).map((m: RegExpMatchArray) => this.stripHtml(m[1])).filter((a: string) => a.trim());
           const published = publishedMatch ? publishedMatch[1] : '';
           const date = published ? new Date(published).toISOString().split('T')[0] : '';
           const arxivId = idMatch[1].split('/').pop();
@@ -435,24 +445,26 @@ export class WebSearchTool implements Tool {
     if (dateRange) {
       const dateRangeLower = dateRange.toLowerCase();
 
-      if (dateRangeLower.includes('year') || dateRangeLower.match(/\d{4}/)) {
-        // Parse year range like "2020-2024"
+      // Check for "last-X-months/years/days" pattern first (most common)
+      if (dateRangeLower.includes('last-')) {
+        // Match patterns like "last-1-month", "last-12-months", "last-5-years", "last-30-days"
+        const match = dateRangeLower.match(/last-(\d+)-?(years?|months?|days?)/);
+        if (match) {
+          const num = parseInt(match[1]);
+          const unit = match[2];
+          arxivQuery += this.buildDateFilter(num, unit);
+        }
+      }
+      // Parse year range like "2020-2024"
+      else if (dateRange.match(/(\d{4})-(\d{4})/)) {
         const yearMatch = dateRange.match(/(\d{4})-(\d{4})/);
         if (yearMatch) {
           arxivQuery += ` AND submittedDate:[${yearMatch[1]}* TO ${yearMatch[2]}*]`;
-        } else if (dateRangeLower.match(/(\d{4})/)) {
-          const year = dateRange.match(/(\d{4})/)?.[1];
-          if (year) {
-            arxivQuery += ` AND submittedDate:[${year}*]`;
-          }
-        } else if (dateRangeLower.includes('last-')) {
-          const match = dateRangeLower.match(/last-(\d+)\s*(years|months|days)/);
-          if (match) {
-            const num = parseInt(match[1]);
-            const unit = match[2];
-            arxivQuery += this.addDateFilter(arxivQuery, num, unit);
-          }
         }
+      }
+      // Single year like "2024"
+      else if (dateRange.match(/^\d{4}$/)) {
+        arxivQuery += ` AND submittedDate:[${dateRange}*]`;
       }
     }
 
@@ -460,9 +472,9 @@ export class WebSearchTool implements Tool {
   }
 
   /**
-   * Add date filter to arXiv query
+   * Build date filter string for arXiv query
    */
-  private addDateFilter(query: string, num: number, unit: string): string {
+  private buildDateFilter(num: number, unit: string): string {
     const now = new Date();
     let startDate: Date;
 
@@ -471,6 +483,7 @@ export class WebSearchTool implements Tool {
     } else if (unit.startsWith('month')) {
       startDate = new Date(now.getFullYear(), now.getMonth() - num, 1);
     } else {
+      // days
       startDate = new Date(now.getTime() - num * 24 * 60 * 60 * 1000);
     }
 
@@ -478,7 +491,7 @@ export class WebSearchTool implements Tool {
     const startMonth = String(startDate.getMonth() + 1).padStart(2, '0');
     const startDay = String(startDate.getDate()).padStart(2, '0');
 
-    return `${query} AND submittedDate:[${startYear}${startMonth}${startDay}* TO 99991231*]`;
+    return ` AND submittedDate:[${startYear}${startMonth}${startDay}* TO 99991231*]`;
   }
 
   /**
@@ -511,7 +524,7 @@ export class WebSearchTool implements Tool {
         return [];
       }
 
-      const data = await response.json();
+      const data = await response.json() as { completions?: any[] };
 
       if (!data.completions || data.completions.length === 0) {
         return [];
@@ -569,7 +582,7 @@ export class WebSearchTool implements Tool {
         return [];
       }
 
-      const data = await response.json();
+      const data = await response.json() as { data?: any[] };
 
       if (!data.data || !Array.isArray(data.data)) {
         return [];

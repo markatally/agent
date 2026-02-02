@@ -1,6 +1,12 @@
-import type { Tool, ToolResult, ToolExecutionError } from './types';
+import type { Tool, ToolResult, ToolContext, ProgressCallback } from './types';
 import { getToolRegistry } from './registry';
-import type { ToolContext } from './types';
+
+/**
+ * Tool execution options
+ */
+interface ToolExecutionOptions {
+  onProgress?: ProgressCallback;
+}
 
 /**
  * Tool Executor
