@@ -40,6 +40,28 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
+# Install Colima + Docker CE via Homebrew (macOS only)
+install_colima_if_needed() {
+    if [ "$(uname -s)" != "Darwin" ]; then
+        print_error "Colima is for macOS only. Please install Docker for your platform."
+        return 1
+    fi
+    if ! command_exists brew; then
+        print_error "Homebrew is required but not installed."
+        print_info "Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        return 1
+    fi
+    print_section "Installing Docker CE (Colima) on macOS"
+    if command_exists colima; then
+        print_success "Colima is already installed"
+    else
+        print_info "Installing Colima, Docker, and Docker Compose..."
+        brew install colima docker docker-compose
+        print_success "Colima installed"
+    fi
+    return 0
+}
+
 # Detect Docker environment
 detect_docker() {
     if command_exists docker; then
@@ -55,8 +77,25 @@ detect_docker() {
         fi
         return 0
     else
-        print_error "Docker not found. Please install Docker or Colima."
-        print_info "Install Colima: brew install colima && colima start"
+        print_error "Docker not found."
+        if [ "$(uname -s)" = "Darwin" ]; then
+            print_info "Run this script again after installing Colima, or we can install it now."
+            read -p "Install Colima via Homebrew now? [Y/n] " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                if install_colima_if_needed; then
+                    print_info "Retrying Docker detection..."
+                    if command_exists docker; then
+                        print_success "Docker found: $(docker --version)"
+                        DOCKER_CMD="colima"
+                        DOCKER_SOCKET="$HOME/.colima/default/docker.sock"
+                        return 0
+                    fi
+                fi
+            fi
+        else
+            print_info "Install Docker for your platform: https://docs.docker.com/get-docker/"
+        fi
         return 1
     fi
 }
@@ -65,7 +104,7 @@ detect_docker() {
 start_docker() {
     if [ "$DOCKER_CMD" = "colima" ]; then
         if ! colima status &> /dev/null; then
-            print_info "Starting Colima..."
+            print_info "Starting Colima (this may take a minute)..."
             colima start --cpu 2 --memory 4 --disk 60
             print_success "Colima started"
         else
@@ -79,6 +118,32 @@ start_docker() {
             print_success "Docker is already running"
         fi
     fi
+}
+
+# Verify Docker and Docker Compose work
+verify_docker() {
+    print_section "Verifying Docker"
+    if ! docker version --format 'Docker: {{.Server.Version}}' &>/dev/null; then
+        print_error "Docker not responding"
+        return 1
+    fi
+    print_success "Docker is working"
+    if ! docker-compose version --short &>/dev/null; then
+        print_error "Docker Compose not responding"
+        return 1
+    fi
+    print_success "Docker Compose is working"
+}
+
+# Pull required infrastructure images
+pull_infrastructure_images() {
+    print_section "Pulling Docker Images"
+    print_info "Pulling postgres:16-alpine..."
+    docker pull postgres:16-alpine
+    print_success "PostgreSQL image pulled"
+    print_info "Pulling redis:7-alpine..."
+    docker pull redis:7-alpine
+    print_success "Redis image pulled"
 }
 
 # Start infrastructure containers
@@ -198,24 +263,24 @@ install_dependencies() {
     print_success "Dependencies installed"
 }
 
-# Run database migrations
+# Run database migrations (deploy = non-interactive, applies pending migrations only)
 run_migrations() {
     print_section "Running Database Migrations"
 
-    cd "$PROJECT_ROOT/apps/api"
+    cd "$PROJECT_ROOT"
 
-    if ! bun run db:migrate &> /dev/null; then
+    if ! bun run db:deploy &> /dev/null; then
         print_error "Failed to run migrations"
         return 1
     fi
     print_success "Database migrations completed"
 }
 
-# Generate Prisma client
+# Generate Prisma client (must run from project root so root's db:generate script is used)
 generate_prisma_client() {
     print_section "Generating Prisma Client"
 
-    cd "$PROJECT_ROOT/apps/api"
+    cd "$PROJECT_ROOT"
 
     if ! bun run db:generate &> /dev/null; then
         print_error "Failed to generate Prisma client"
@@ -279,6 +344,13 @@ print_summary() {
     echo -e "  • View logs: ${BLUE}docker-compose logs -f${NC}"
     echo -e "  • Run tests: ${BLUE}bun run test${NC}"
     echo -e "  • Prisma Studio: ${BLUE}bun run db:studio${NC}"
+    if [ "$DOCKER_CMD" = "colima" ]; then
+        echo -e "\n${GREEN}Colima:${NC}"
+        echo -e "  • Start: ${BLUE}colima start${NC}"
+        echo -e "  • Stop: ${BLUE}colima stop${NC}"
+        echo -e "  • Status: ${BLUE}colima status${NC}"
+        echo -e "  • Reset: ${BLUE}colima delete --force && colima start${NC}"
+    fi
 
     echo -e "\n${GREEN}Environment Variables:${NC}"
     echo -e "  ${YELLOW}WORKSPACE_ROOT${NC}=$WORKSPACE_ROOT"
@@ -289,11 +361,13 @@ print_summary() {
 main() {
     print_section "Manus Agent - Local Environment Setup"
 
-    # Step 1: Detect and start Docker
+    # Step 1: Detect and start Docker (install Colima on macOS if needed)
     if ! detect_docker; then
         exit 1
     fi
     start_docker
+    verify_docker
+    pull_infrastructure_images
 
     # Step 2: Start infrastructure
     start_infrastructure

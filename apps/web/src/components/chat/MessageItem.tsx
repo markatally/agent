@@ -47,11 +47,6 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
               addSuffix: true,
             })}
           </span>
-          {isStreaming && (
-            <span className="text-xs text-muted-foreground animate-pulse">
-              ●
-            </span>
-          )}
         </div>
 
         {/* Message content with markdown */}

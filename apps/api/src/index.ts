@@ -61,16 +61,20 @@ app.onError((err, c) => {
   );
 });
 
-// Start server
-const port = Number(process.env.PORT) || 4000;
+// Start server only when run directly (not when imported by tests)
+const isMainModule = import.meta.main || process.argv[1]?.includes('index.ts');
 
-console.log(`Starting server on port ${port}...`);
+if (isMainModule) {
+  const port = Number(process.env.PORT) || 4000;
 
-serve({
-  fetch: app.fetch,
-  port,
-});
+  console.log(`Starting server on port ${port}...`);
 
-console.log(`Server running at http://localhost:${port}`);
+  serve({
+    fetch: app.fetch,
+    port,
+  });
+
+  console.log(`Server running at http://localhost:${port}`);
+}
 
 export default app;

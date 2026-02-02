@@ -23,6 +23,7 @@ interface ChatState {
   streamingSessionId: string | null;
   streamingContent: string;
   isStreaming: boolean;
+  isThinking: boolean; // True between message.start and first token
 
   // Tool calls state
   toolCalls: Map<string, ToolCallStatus>;
@@ -60,6 +61,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingSessionId: null,
   streamingContent: '',
   isStreaming: false,
+  isThinking: false,
   toolCalls: new Map(),
   files: new Map(),
 
@@ -104,12 +106,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  // Start streaming
+  // Start streaming (enters "thinking" state until first token)
   startStreaming: (sessionId: string) => {
     set({
       streamingSessionId: sessionId,
       streamingContent: '',
       isStreaming: true,
+      isThinking: true, // Thinking until first token arrives
     });
   },
 
@@ -117,6 +120,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   appendStreamingContent: (content: string) => {
     set((state) => ({
       streamingContent: state.streamingContent + content,
+      isThinking: false, // First token arrived, no longer thinking
     }));
   },
 
@@ -132,6 +136,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSessionId: null,
       streamingContent: '',
       isStreaming: false,
+      isThinking: false,
     });
   },
 
@@ -141,6 +146,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSessionId: null,
       streamingContent: '',
       isStreaming: false,
+      isThinking: false,
     });
   },
 

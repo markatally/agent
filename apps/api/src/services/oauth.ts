@@ -9,10 +9,12 @@ const prisma = new PrismaClient();
 const googleClientId = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
-// The callback URL must point to the frontend's OAuth callback page
-// Default: http://localhost:3000/auth/google/callback
-// Set GOOGLE_CALLBACK_URL environment variable for production
-const callbackUrl = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/auth/google/callback';
+// Redirect URI: where Google sends the user after consent. Must EXACTLY match
+// one of the "Authorized redirect URIs" in Google Cloud Console (scheme, case,
+// and trailing slash must all match). See:
+// https://developers.google.com/identity/protocols/oauth2/web-server#authorization-errors-redirect-uri-mismatch
+const rawCallbackUrl = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/api/auth/google/callback';
+const callbackUrl = rawCallbackUrl.trim().replace(/\/+$/, ''); // trim + no trailing slash
 
 if (!googleClientId || !googleClientSecret) {
   console.warn('Google OAuth credentials not configured. Google login will be disabled.');
@@ -22,6 +24,12 @@ let google: Google | null = null;
 
 if (googleClientId && googleClientSecret) {
   google = new Google(googleClientId, googleClientSecret, callbackUrl);
+  console.log(`Google OAuth: Add this EXACT redirect URI in Cloud Console → Credentials → Your OAuth client → Authorized redirect URIs:\n  ${callbackUrl}`);
+}
+
+/** Redirect URI sent to Google (for debugging redirect_uri_mismatch). */
+export function getGoogleRedirectUri(): string | null {
+  return google ? callbackUrl : null;
 }
 
 // In-memory store for PKCE code verifiers (state -> codeVerifier)

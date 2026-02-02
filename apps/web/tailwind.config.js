@@ -50,6 +50,15 @@ export default {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
   			sm: 'calc(var(--radius) - 4px)'
+  		},
+  		keyframes: {
+  			'streaming-gradient': {
+  				'0%, 100%': { backgroundPosition: '0% 50%' },
+  				'50%': { backgroundPosition: '100% 50%' },
+  			}
+  		},
+  		animation: {
+  			'streaming-gradient': 'streaming-gradient 2s ease infinite',
   		}
   	}
   },

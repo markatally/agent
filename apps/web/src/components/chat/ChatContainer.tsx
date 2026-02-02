@@ -29,6 +29,7 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
   const startStreaming = useChatStore((state) => state.startStreaming);
   const appendStreamingContent = useChatStore((state) => state.appendStreamingContent);
   const stopStreaming = useChatStore((state) => state.stopStreaming);
+  const isStreaming = useChatStore((state) => state.isStreaming);
   const startToolCall = useChatStore((state) => state.startToolCall);
   const completeToolCall = useChatStore((state) => state.completeToolCall);
 
@@ -135,6 +136,10 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
 
       addMessage(sessionId, tempUserMessage as any);
 
+      // Re-enable input immediately after user message is added
+      // User can see their message and the thinking indicator while we stream
+      setIsSending(false);
+
       // Stream response from backend
       for await (const event of apiClient.chat.sendAndStream(sessionId, content)) {
         handleSSEEvent(event);
@@ -144,13 +149,12 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
       queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'messages'] });
     } catch (error: any) {
       stopStreaming();
+      setIsSending(false);
       toast({
         title: 'Failed to send message',
         description: error.message || 'Could not send message',
         variant: 'destructive',
       });
-    } finally {
-      setIsSending(false);
     }
   };
 
@@ -193,7 +197,11 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
     <div className="flex flex-1 flex-col overflow-y-auto">
       <MessageList sessionId={sessionId} />
       <ToolCallDisplay sessionId={sessionId} />
-      <ChatInput onSend={handleSendMessage} disabled={isSending || !isSessionValid} />
+      <ChatInput 
+        onSend={handleSendMessage} 
+        disabled={isSending || !isSessionValid}
+        sendDisabled={isStreaming}
+      />
 
       {/* Display generated files independently */}
       {files.length > 0 && (

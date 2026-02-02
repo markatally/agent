@@ -11,6 +11,7 @@ import {
 import {
   generateState,
   getGoogleAuthorizationUrl,
+  getGoogleRedirectUri,
   exchangeGoogleCode,
   completeGoogleLogin,
 } from '../services/oauth';
@@ -191,6 +192,25 @@ auth.post('/refresh', zValidator('json', refreshSchema), async (c) => {
       401
     );
   }
+});
+
+/**
+ * GET /api/auth/google/redirect-uri
+ * Return the redirect URI this app sends to Google. Copy this EXACT value into
+ * Google Cloud Console → Credentials → OAuth 2.0 Client → Authorized redirect URIs.
+ */
+auth.get('/google/redirect-uri', (c) => {
+  const uri = getGoogleRedirectUri();
+  if (!uri) {
+    return c.json(
+      { error: { code: 'OAUTH_NOT_CONFIGURED', message: 'Google OAuth is not configured' } },
+      503
+    );
+  }
+  return c.json({
+    redirectUri: uri,
+    hint: 'Add this EXACT value in Google Cloud Console → APIs & Services → Credentials → Your OAuth 2.0 Client ID → Authorized redirect URIs (not JavaScript origins)',
+  });
 });
 
 /**

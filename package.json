@@ -16,6 +16,7 @@
     "lint": "turbo run lint",
     "worker": "cd apps/api && bun run worker",
     "db:migrate": "cd apps/api && bunx prisma migrate dev",
+    "db:deploy": "cd apps/api && bunx prisma migrate deploy",
     "db:generate": "cd apps/api && bunx prisma generate",
     "db:studio": "cd apps/api && bunx prisma studio",
     "clean": "turbo run clean && rm -rf node_modules"

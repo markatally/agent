@@ -5,15 +5,18 @@ import { Textarea } from '../ui/textarea';
 
 interface ChatInputProps {
   onSend: (content: string) => void;
-  disabled?: boolean;
+  disabled?: boolean;      // Completely disables input (invalid session, sending)
+  sendDisabled?: boolean;  // Only disables send button (streaming)
 }
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, sendDisabled }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const canSend = !disabled && !sendDisabled && message.trim();
+
   const handleSend = () => {
-    if (!message.trim() || disabled) return;
+    if (!canSend) return;
 
     onSend(message.trim());
     setMessage('');
@@ -60,7 +63,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         />
         <Button
           onClick={handleSend}
-          disabled={disabled || !message.trim()}
+          disabled={!canSend}
           size="icon"
           className="shrink-0"
         >

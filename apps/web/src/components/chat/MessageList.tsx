@@ -3,6 +3,7 @@ import { Loader2, AlertCircle } from 'lucide-react';
 import { useSessionMessages } from '../../hooks/useChat';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageItem } from './MessageItem';
+import { ThinkingIndicator } from './ThinkingIndicator';
 import { ScrollArea } from '../ui/scroll-area';
 import { Skeleton } from '../ui/skeleton';
 import { ApiError } from '../../lib/api';
@@ -13,10 +14,23 @@ interface MessageListProps {
 
 export function MessageList({ sessionId }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { data: messages, isLoading, error } = useSessionMessages(sessionId);
+  const { data: apiMessages, isLoading, error } = useSessionMessages(sessionId);
+  const localMessages = useChatStore((state) => state.messages.get(sessionId) || []);
   const streamingContent = useChatStore((state) => state.streamingContent);
   const isStreaming = useChatStore((state) => state.isStreaming);
+  const isThinking = useChatStore((state) => state.isThinking);
   const streamingSessionId = useChatStore((state) => state.streamingSessionId);
+
+  // Merge API messages with local optimistic messages
+  // Local messages with temp IDs are optimistic and should be shown immediately
+  const messages = (() => {
+    const apiMessageIds = new Set((apiMessages || []).map(m => m.id));
+    // Get optimistic messages (those with temp- prefix not yet in API)
+    const optimisticMessages = localMessages.filter(
+      m => m.id.startsWith('temp-') && !apiMessageIds.has(m.id)
+    );
+    return [...(apiMessages || []), ...optimisticMessages];
+  })();
 
   // Determine error type for better display
   const errorType = error instanceof ApiError ? {
@@ -29,12 +43,12 @@ export function MessageList({ sessionId }: MessageListProps) {
     message: error instanceof Error ? error.message : 'Unknown error',
   };
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or thinking starts
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, isThinking]);
 
   if (isLoading) {
     return (
@@ -70,7 +84,11 @@ export function MessageList({ sessionId }: MessageListProps) {
     );
   }
 
-  if (!messages || messages.length === 0) {
+  const isStreamingThisSession = isStreaming && streamingSessionId === sessionId;
+  const isThinkingThisSession = isThinking && streamingSessionId === sessionId;
+
+  // Show empty state only if no messages AND not currently streaming/thinking
+  if ((!messages || messages.length === 0) && !isThinkingThisSession && !isStreamingThisSession) {
     return (
       <div className="flex flex-1 items-center justify-center p-4">
         <div className="text-center">
@@ -83,8 +101,6 @@ export function MessageList({ sessionId }: MessageListProps) {
     );
   }
 
-  const isStreamingThisSession = isStreaming && streamingSessionId === sessionId;
-
   return (
     <ScrollArea className="flex-1">
       <div ref={scrollRef} className="flex flex-col">
@@ -92,7 +108,12 @@ export function MessageList({ sessionId }: MessageListProps) {
           <MessageItem key={message.id} message={message} />
         ))}
 
-        {/* Streaming message */}
+        {/* Thinking indicator - shown before first token arrives */}
+        {isThinkingThisSession && !streamingContent && (
+          <ThinkingIndicator />
+        )}
+
+        {/* Streaming message - shown once tokens start arriving */}
         {isStreamingThisSession && streamingContent && (
           <MessageItem
             message={{
