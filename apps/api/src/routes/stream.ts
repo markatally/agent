@@ -10,6 +10,14 @@ import { getSkillProcessor } from '../services/skills/processor';
 import { getTaskManager } from '../services/tasks';
 import path from 'path';
 
+// LangGraph imports (optional - for graph-based agent execution)
+import {
+  createAgentRouter,
+  createDefaultSkillRegistry,
+  type AgentState,
+  type ResearchState,
+} from '../services/langgraph';
+
 const stream = new Hono<AuthContext>();
 
 // All stream routes require authentication
@@ -830,5 +838,297 @@ stream.post('/sessions/:sessionId/chat', async (c) => {
     }
   });
 });
+
+/**
+ * POST /api/sessions/:sessionId/agent
+ * 
+ * NEW: Graph-based agent execution using LangGraph orchestration.
+ * This endpoint provides deterministic, scenario-based execution with:
+ * - Explicit DAG-based workflow
+ * - Evidence-backed claims with citations
+ * - Validation gates and hard constraints
+ * 
+ * Currently supports scenarios: research, ppt, summary, general_chat
+ * 
+ * BACKWARD COMPATIBLE: This is a NEW endpoint that runs alongside
+ * the existing /chat endpoint. Use /chat for standard LLM interactions,
+ * use /agent for structured, graph-based tasks.
+ */
+stream.post('/sessions/:sessionId/agent', async (c) => {
+  const user = c.get('user');
+  const sessionId = c.req.param('sessionId');
+
+  // Parse request body
+  let content: string;
+  let forceScenario: string | undefined;
+  
+  try {
+    const body = await c.req.json();
+    content = body.content;
+    forceScenario = body.scenario; // Optional: force a specific scenario
+    
+    if (!content || typeof content !== 'string') {
+      return c.json(
+        {
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Content is required',
+          },
+        },
+        400
+      );
+    }
+  } catch {
+    return c.json(
+      {
+        error: {
+          code: 'INVALID_JSON',
+          message: 'Invalid JSON in request body',
+        },
+      },
+      400
+    );
+  }
+
+  // Verify session exists and belongs to user
+  const session = await prisma.session.findUnique({
+    where: {
+      id: sessionId,
+      userId: user.userId,
+    },
+  });
+
+  if (!session) {
+    return c.json(
+      {
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found',
+        },
+      },
+      404
+    );
+  }
+
+  if (session.status !== 'active') {
+    return c.json(
+      {
+        error: {
+          code: 'SESSION_NOT_ACTIVE',
+          message: 'Session is not active',
+        },
+      },
+      400
+    );
+  }
+
+  // Create user message
+  const userMessage = await prisma.message.create({
+    data: {
+      sessionId,
+      role: 'user',
+      content,
+    },
+  });
+
+  // Set up context
+  const workspaceDir = session.workspacePath || path.join(process.env.WORKSPACE_ROOT || '/tmp/manus-workspaces', sessionId);
+  const toolContext: ToolContext = {
+    sessionId,
+    userId: user.userId,
+    workspaceDir,
+  };
+
+  // Get dependencies for LangGraph
+  const toolRegistry = getToolRegistry(toolContext);
+  const llmClient = getLLMClient();
+  const skillRegistry = createDefaultSkillRegistry();
+
+  // Create agent router
+  const agentRouter = createAgentRouter(skillRegistry, toolRegistry, llmClient);
+
+  return streamSSE(c, async (sseStream) => {
+    const startTime = Date.now();
+
+    try {
+      // Send agent.start event
+      await sseStream.writeSSE({
+        data: JSON.stringify({
+          type: 'agent.start',
+          sessionId,
+          timestamp: Date.now(),
+          data: {
+            userMessageId: userMessage.id,
+            mode: 'langgraph',
+          },
+        }),
+      });
+
+      // Run the agent graph
+      const result = await agentRouter.run(sessionId, user.userId, content);
+
+      // Stream execution path as events
+      for (const nodeId of result.executionPath) {
+        await sseStream.writeSSE({
+          data: JSON.stringify({
+            type: 'agent.node',
+            sessionId,
+            timestamp: Date.now(),
+            data: {
+              nodeId,
+              status: 'completed',
+            },
+          }),
+        });
+      }
+
+      // Handle success/failure
+      if (result.success) {
+        // Extract final content based on scenario
+        let finalContent = '';
+        const finalState = result.finalState;
+        
+        if ('finalReport' in finalState && finalState.finalReport) {
+          // Research scenario - format report
+          const report = (finalState as ResearchState).finalReport;
+          finalContent = formatResearchReport(report);
+        } else if (finalState.finalOutput) {
+          // Generic output
+          finalContent = typeof finalState.finalOutput === 'string' 
+            ? finalState.finalOutput 
+            : JSON.stringify(finalState.finalOutput, null, 2);
+        } else {
+          finalContent = 'Agent completed successfully but produced no output.';
+        }
+
+        // Save assistant message
+        const assistantMessage = await prisma.message.create({
+          data: {
+            sessionId,
+            role: 'assistant',
+            content: finalContent,
+            metadata: {
+              source: 'langgraph',
+              scenario: finalState.parsedIntent?.scenario,
+              executionPath: result.executionPath,
+              duration: result.totalDuration,
+            },
+          },
+        });
+
+        // Send completion events
+        await sseStream.writeSSE({
+          data: JSON.stringify({
+            type: 'message.delta',
+            sessionId,
+            timestamp: Date.now(),
+            data: { content: finalContent },
+          }),
+        });
+
+        await sseStream.writeSSE({
+          data: JSON.stringify({
+            type: 'message.complete',
+            sessionId,
+            timestamp: Date.now(),
+            data: {
+              userMessageId: userMessage.id,
+              assistantMessageId: assistantMessage.id,
+              scenario: finalState.parsedIntent?.scenario,
+              finishReason: 'stop',
+            },
+          }),
+        });
+
+      } else {
+        // Handle failure
+        const errors = result.finalState.errors || [];
+        const errorMessages = errors.map(e => e.message).join('; ');
+        
+        // Save error response
+        const assistantMessage = await prisma.message.create({
+          data: {
+            sessionId,
+            role: 'assistant',
+            content: `Agent execution failed: ${errorMessages}`,
+            metadata: {
+              source: 'langgraph',
+              status: 'failed',
+              errors: errors.map(e => ({ code: e.code, message: e.message })),
+              executionPath: result.executionPath,
+            },
+          },
+        });
+
+        await sseStream.writeSSE({
+          data: JSON.stringify({
+            type: 'agent.error',
+            sessionId,
+            timestamp: Date.now(),
+            data: {
+              code: 'AGENT_FAILED',
+              message: errorMessages,
+              errors: errors,
+              executionPath: result.executionPath,
+            },
+          }),
+        });
+      }
+
+      // Update session lastActiveAt
+      await prisma.session.update({
+        where: { id: sessionId },
+        data: { lastActiveAt: new Date() },
+      });
+
+    } catch (error) {
+      console.error('Agent error:', error);
+
+      await sseStream.writeSSE({
+        data: JSON.stringify({
+          type: 'error',
+          sessionId,
+          timestamp: Date.now(),
+          data: {
+            code: 'AGENT_ERROR',
+            message: error instanceof Error ? error.message : 'Unknown agent error',
+          },
+        }),
+      });
+    }
+  });
+});
+
+/**
+ * Format research report for display
+ */
+function formatResearchReport(report: any): string {
+  if (!report) return 'No report generated.';
+  
+  let content = `# ${report.title || 'Research Report'}\n\n`;
+  
+  if (report.abstract) {
+    content += `## Abstract\n\n${report.abstract}\n\n`;
+  }
+  
+  if (report.sections && Array.isArray(report.sections)) {
+    for (const section of report.sections) {
+      content += `## ${section.heading}\n\n${section.content}\n\n`;
+      
+      if (section.citations && section.citations.length > 0) {
+        content += `*Sources: ${section.citations.join(', ')}*\n\n`;
+      }
+    }
+  }
+  
+  if (report.bibliography && Array.isArray(report.bibliography)) {
+    content += `## References\n\n`;
+    for (const ref of report.bibliography) {
+      content += `- ${ref.citation || ref.paperId}\n`;
+    }
+  }
+  
+  return content;
+}
 
 export { stream as streamRoutes };

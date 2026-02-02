@@ -235,6 +235,32 @@ interface Skill {
 
 ## Architecture
 
+### Agent Orchestration (LangGraph-Based)
+The system uses LangGraph for deterministic, graph-based agent orchestration.
+
+**Key Architectural Principles:**
+- All workflow logic expressed as explicit LangGraph nodes and edges
+- Routing decisions made by deterministic functions, never by LLM inference
+- Each capability implemented as an atomic skill with strict I/O schemas
+- Every claim must be evidence-backed with citations
+
+**Core Components (`apps/api/src/services/langgraph/`):**
+| File | Purpose |
+|------|---------|
+| `types.ts` | Zod-based state schemas (AgentState, ResearchState, etc.) |
+| `skills.ts` | Atomic skill definitions with registry |
+| `nodes.ts` | Graph node implementations with pre/post conditions |
+| `graphs.ts` | DAG definitions and graph executor |
+| `validation.ts` | Hard constraints and validation rules |
+
+**Scenario Graphs:**
+- `ResearchGraph` - Paper discovery → Summarize → Compare → Synthesis → Report
+- `PPTGraph` - Outline → Slide Content → Export
+- `SummaryGraph` - Chunk → Extract → Generate
+- `GeneralChatGraph` - Tool detection → Execution → Response
+
+**Architectural Documentation:** See `docs/LANGGRAPH_ARCHITECTURE.md` for complete design.
+
 ### API Endpoints
 - `POST /api/auth/register|login|refresh` - Authentication
 - `GET|POST|DELETE /api/sessions` - Session management
@@ -244,12 +270,13 @@ interface Skill {
 - `POST /api/sessions/:id/cancel|approve|reject` - Execution control
 
 ### SSE Event Types
-`message.start|delta|complete`, `thinking.start|delta|complete`, `tool.start|progress|complete|error`, `plan.created`, `approval.required`, `file.created|modified|deleted`
+`message.start|delta|complete`, `thinking.start|delta|complete`, `tool.start|progress|complete|error`, `plan.created`, `approval.required`, `file.created|modified|deleted`, `agent.step_limit`
 
 ### Sandbox
 - Docker containers with resource limits (512MB RAM, 1 CPU, 1GB disk)
 - Network disabled by default
 - Isolated per-session workspace at `/workspace`
+- Auto-detects Docker socket (Colima, Docker Desktop, Podman)
 
 ### Authentication
 - JWT tokens (15min access, 7day refresh)
@@ -342,8 +369,11 @@ Example: `ppt_generator.ts` creates `.pptx` files in `outputs/ppt/`
 ## Key Files
 
 - `.claude/SPEC.md` - **Authoritative technical specification** (implementation patterns)
+- `.claude/PROGRESS.md` - **Execution state** (current status, next steps, history)
+- `docs/LANGGRAPH_ARCHITECTURE.md` - **LangGraph orchestration design** (DAGs, skills, validation)
 - `config/default.json` - Runtime configuration
 - `apps/api/prisma/schema.prisma` - Database schema
+- `apps/api/src/services/langgraph/` - **LangGraph agent system** (types, skills, nodes, graphs)
 - `packages/shared/src/index.ts` - Shared TypeScript types (290 lines)
 - `skills/index.ts` - Agent skill registry (product features)
 - `docker-compose.yml` - Infrastructure definition
@@ -351,7 +381,6 @@ Example: `ppt_generator.ts` creates `.pptx` files in `outputs/ppt/`
 - `.claude/skills/` - Specialized Claude Code skills (api-development, mcp-integration, etc.)
 - `tests/` - **Test suite** (217 tests: unit + integration)
 - `tests/README.md` - Test documentation and guidelines
-- `apps/api/TEST_RESULTS.md` - Test results and bug fixes
 
 ## Agent Skills Registration
 
