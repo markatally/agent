@@ -421,7 +421,7 @@ export class WebSearchTool implements Tool {
 
       return results;
     } catch (error) {
-      console.warn('arXiv search failed:', error);
+      // arXiv API unavailable - silently skip
       return [];
     }
   }
@@ -507,7 +507,7 @@ export class WebSearchTool implements Tool {
       });
 
       if (!response.ok) {
-        console.warn(`alphaXiv API error: ${response.status} ${response.statusText}`);
+        // alphaXiv API may not be publicly available - silently skip
         return [];
       }
 
@@ -538,7 +538,7 @@ export class WebSearchTool implements Tool {
 
       return results;
     } catch (error) {
-      console.warn('alphaXiv search failed:', error);
+      // alphaXiv API not available - silently skip
       return [];
     }
   }
@@ -551,11 +551,11 @@ export class WebSearchTool implements Tool {
   private async searchGoogleScholar(query: string, limit: number): Promise<PaperMetadata[]> {
     try {
       // Try using Semantic Scholar API (open-source alternative)
-      const baseUrl = 'https://api.semanticscholar.org/api/v1/search';
+      const baseUrl = 'https://api.semanticscholar.org/graph/v1/paper/search';
       const searchParams = new URLSearchParams({
-        query: query.replace(/\s+/g, '+'),
+        query: query,
         limit: limit.toString(),
-        fields: 'title,authors,year,venue,url,abstract',
+        fields: 'title,authors,year,venue,url,abstract,citationCount',
       });
 
       const response = await fetch(`${baseUrl}?${searchParams}`, {
@@ -565,7 +565,7 @@ export class WebSearchTool implements Tool {
       });
 
       if (!response.ok) {
-        console.warn(`Semantic Scholar API error: ${response.status} ${response.statusText}`);
+        // Semantic Scholar API unavailable - silently skip
         return [];
       }
 
@@ -577,7 +577,7 @@ export class WebSearchTool implements Tool {
 
       return data.data.map((item: any) => ({
         title: item.title || 'Untitled',
-        authors: item.authors || [],
+        authors: item.authors?.map((a: any) => a.name) || [],
         date: item.year ? String(item.year) : '',
         venue: item.venue || 'Semantic Scholar',
         link: item.url || `https://www.semanticscholar.org/paper/${item.paperId}`,
@@ -586,7 +586,7 @@ export class WebSearchTool implements Tool {
         citations: item.citationCount,
       }));
     } catch (error) {
-      console.warn('Google Scholar/Semantic Scholar search failed:', error);
+      // Semantic Scholar API unavailable - silently skip
       return [];
     }
   }

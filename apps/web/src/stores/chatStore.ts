@@ -42,6 +42,7 @@ interface ChatState {
   appendStreamingContent: (content: string) => void;
   finalizeStreamingMessage: (messageId: string, message: Message) => void;
   stopStreaming: () => void;
+  setThinking: (isThinking: boolean) => void;
 
   // Actions - Tool calls
   startToolCall: (toolCallId: string, toolName: string, params: any) => void;
@@ -148,6 +149,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: false,
       isThinking: false,
     });
+  },
+
+  // Set thinking state (used for multi-step tool execution)
+  setThinking: (isThinking: boolean) => {
+    set({ isThinking });
   },
 
   // Start a tool call

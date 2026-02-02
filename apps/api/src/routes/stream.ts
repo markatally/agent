@@ -105,6 +105,14 @@ async function processAgentTurn(
         hasToolCalls = true;
         toolCallsCollected.push(chunk.toolCall);
 
+        // Parse params for the tool.start event so frontend can display them
+        let params = {};
+        try {
+          params = JSON.parse(chunk.toolCall.arguments || '{}');
+        } catch {
+          // Keep empty params if JSON parsing fails
+        }
+
         await sseStream.writeSSE({
           data: JSON.stringify({
             type: 'tool.start',
@@ -113,6 +121,7 @@ async function processAgentTurn(
             data: {
               toolCallId: chunk.toolCall.id,
               toolName: chunk.toolCall.name,
+              params,
               step: steps + 1,
             },
           }),
@@ -309,6 +318,20 @@ async function processAgentTurn(
 
     steps++;
     finalContent += stepContent; // Accumulate content across steps
+
+    // Emit thinking.start before next LLM call so frontend shows progress
+    // This prevents the UI from appearing "stuck" between tool execution steps
+    await sseStream.writeSSE({
+      data: JSON.stringify({
+        type: 'thinking.start',
+        sessionId,
+        timestamp: Date.now(),
+        data: {
+          step: steps + 1,
+          message: 'Processing results...',
+        },
+      }),
+    });
   }
 
   // === Hit step limit ===

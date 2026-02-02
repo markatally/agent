@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { MessageList } from './MessageList';
@@ -17,6 +17,7 @@ interface ChatContainerProps {
 export function ChatContainer({ sessionId }: ChatContainerProps) {
   const [isSending, setIsSending] = useState(false);
   const [files, setFiles] = useState<import('@manus/shared').Artifact[]>([]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -29,9 +30,25 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
   const startStreaming = useChatStore((state) => state.startStreaming);
   const appendStreamingContent = useChatStore((state) => state.appendStreamingContent);
   const stopStreaming = useChatStore((state) => state.stopStreaming);
+  const setThinking = useChatStore((state) => state.setThinking);
   const isStreaming = useChatStore((state) => state.isStreaming);
   const startToolCall = useChatStore((state) => state.startToolCall);
   const completeToolCall = useChatStore((state) => state.completeToolCall);
+  const messages = useChatStore((state) => state.messages.get(sessionId) || []);
+  const streamingContent = useChatStore((state) => state.streamingContent);
+  const isThinking = useChatStore((state) => state.isThinking);
+
+  // Scroll to bottom helper
+  const scrollToBottom = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+  };
+
+  // Auto-scroll when messages or streaming content changes
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length, streamingContent, isThinking]);
 
   const handleSSEEvent = (event: SSEEvent) => {
     switch (event.type) {
@@ -51,8 +68,15 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
         queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'messages'] });
         break;
 
+      case 'thinking.start':
+        // Set thinking state to show indicator between tool execution steps
+        setThinking(true);
+        break;
+
       case 'tool.start':
         if (event.data) {
+          // Turn off thinking indicator since tool card provides visual feedback
+          setThinking(false);
           startToolCall(
             event.data.toolCallId,
             event.data.toolName,
@@ -136,6 +160,11 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
 
       addMessage(sessionId, tempUserMessage as any);
 
+      // Scroll to bottom immediately after adding user message
+      setTimeout(() => {
+        scrollToBottom();
+      }, 0);
+
       // Re-enable input immediately after user message is added
       // User can see their message and the thinking indicator while we stream
       setIsSending(false);
@@ -194,26 +223,31 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto">
-      <MessageList sessionId={sessionId} />
-      <ToolCallDisplay sessionId={sessionId} />
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Scrollable content area */}
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+        <MessageList sessionId={sessionId} />
+        <ToolCallDisplay sessionId={sessionId} />
+
+        {/* Display generated files in the scrollable area */}
+        {files.length > 0 && (
+          <div className="p-4 border-t bg-muted/20">
+            <div className="text-xs font-medium text-muted-foreground mb-2">
+              Generated Files ({files.length})
+            </div>
+            {files.map((file, idx) => (
+              <ArtifactDisplay key={idx} artifact={file} sessionId={sessionId} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Input always at the bottom */}
       <ChatInput 
         onSend={handleSendMessage} 
         disabled={isSending || !isSessionValid}
         sendDisabled={isStreaming}
       />
-
-      {/* Display generated files independently */}
-      {files.length > 0 && (
-        <div className="p-4 border-t bg-muted/20">
-          <div className="text-xs font-medium text-muted-foreground mb-2">
-            Generated Files ({files.length})
-          </div>
-          {files.map((file, idx) => (
-            <ArtifactDisplay key={idx} artifact={file} sessionId={sessionId} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

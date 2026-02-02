@@ -1,10 +1,8 @@
-import { useEffect, useRef } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { useSessionMessages } from '../../hooks/useChat';
 import { useChatStore } from '../../stores/chatStore';
 import { MessageItem } from './MessageItem';
 import { ThinkingIndicator } from './ThinkingIndicator';
-import { ScrollArea } from '../ui/scroll-area';
 import { Skeleton } from '../ui/skeleton';
 import { ApiError } from '../../lib/api';
 
@@ -13,7 +11,6 @@ interface MessageListProps {
 }
 
 export function MessageList({ sessionId }: MessageListProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
   const { data: apiMessages, isLoading, error } = useSessionMessages(sessionId);
   const localMessages = useChatStore((state) => state.messages.get(sessionId) || []);
   const streamingContent = useChatStore((state) => state.streamingContent);
@@ -42,13 +39,6 @@ export function MessageList({ sessionId }: MessageListProps) {
     isUnauthorized: false,
     message: error instanceof Error ? error.message : 'Unknown error',
   };
-
-  // Auto-scroll to bottom when new messages arrive or thinking starts
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, streamingContent, isThinking]);
 
   if (isLoading) {
     return (
@@ -102,31 +92,29 @@ export function MessageList({ sessionId }: MessageListProps) {
   }
 
   return (
-    <ScrollArea className="flex-1">
-      <div ref={scrollRef} className="flex flex-col">
-        {messages.map((message) => (
-          <MessageItem key={message.id} message={message} />
-        ))}
+    <div className="p-4 space-y-4">
+      {messages.map((message) => (
+        <MessageItem key={message.id} message={message} />
+      ))}
 
-        {/* Thinking indicator - shown before first token arrives */}
-        {isThinkingThisSession && !streamingContent && (
-          <ThinkingIndicator />
-        )}
+      {/* Thinking indicator - shown before first token arrives */}
+      {isThinkingThisSession && !streamingContent && (
+        <ThinkingIndicator />
+      )}
 
-        {/* Streaming message - shown once tokens start arriving */}
-        {isStreamingThisSession && streamingContent && (
-          <MessageItem
-            message={{
-              id: 'streaming',
-              sessionId,
-              role: 'assistant',
-              content: streamingContent,
-              createdAt: new Date(),
-            } as any}
-            isStreaming
-          />
-        )}
-      </div>
-    </ScrollArea>
+      {/* Streaming message - shown once tokens start arriving */}
+      {isStreamingThisSession && streamingContent && (
+        <MessageItem
+          message={{
+            id: 'streaming',
+            sessionId,
+            role: 'assistant',
+            content: streamingContent,
+            createdAt: new Date(),
+          } as any}
+          isStreaming
+        />
+      )}
+    </div>
   );
 }

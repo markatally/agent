@@ -120,7 +120,7 @@ export class SandboxManager {
   async createSandbox(options: CreateSandboxOptions): Promise<ContainerInfo> {
     const { sessionId, workspaceDir, env = {} } = options;
 
-    // Check if container already exists
+    // Check if container already exists in our map
     if (this.containers.has(sessionId)) {
       const existing = this.containers.get(sessionId)!;
       if (existing.status === 'running') {
@@ -128,6 +128,30 @@ export class SandboxManager {
       }
       // Clean up stopped container
       await this.destroySandbox(sessionId);
+    }
+
+    // Also check if a Docker container with this name already exists
+    // (can happen if server restarted without proper cleanup)
+    const containerName = `manus-sandbox-${sessionId}`;
+    try {
+      const existingContainers = await this.docker.listContainers({
+        all: true,
+        filters: { name: [containerName] },
+      });
+      if (existingContainers.length > 0) {
+        console.log(`[Sandbox] Found orphaned container ${containerName}, removing...`);
+        for (const containerInfo of existingContainers) {
+          try {
+            const container = this.docker.getContainer(containerInfo.Id);
+            await container.remove({ force: true });
+            console.log(`[Sandbox] Removed orphaned container ${containerInfo.Id}`);
+          } catch (removeError: any) {
+            console.warn(`[Sandbox] Failed to remove orphaned container: ${removeError.message}`);
+          }
+        }
+      }
+    } catch (listError: any) {
+      console.warn(`[Sandbox] Failed to check for orphaned containers: ${listError.message}`);
     }
 
     try {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Search, Download } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -7,6 +7,7 @@ import { cn } from '../../lib/utils';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ArtifactDisplay } from './ArtifactDisplay';
+import { filesApi } from '../../lib/api';
 
 interface ToolCallDisplayProps {
   sessionId: string;
@@ -42,6 +43,38 @@ const addShimmerStyles = () => {
 };
 
 addShimmerStyles();
+
+/**
+ * Handle file download for PPT generator
+ */
+async function handleDownload(
+  e: React.MouseEvent<HTMLButtonElement>,
+  sessionId: string,
+  fileId: string | undefined,
+  filename: string
+): Promise<void> {
+  e.stopPropagation();
+
+  if (!fileId) {
+    console.error('No fileId provided for download');
+    return;
+  }
+
+  try {
+    const blob = await filesApi.download(sessionId, fileId);
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(downloadUrl);
+  } catch (error) {
+    console.error('Download failed:', error);
+    alert(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
 
 export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
   const [expandedCalls, setExpandedCalls] = useState<Set<string>>(new Set());
@@ -117,26 +150,44 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
                     {toolCall.toolName}
                   </CardTitle>
                 </div>
-                <Badge
-                  variant={
-                    toolCall.status === 'completed'
-                      ? 'default'
-                      : toolCall.status === 'failed'
-                      ? 'destructive'
-                      : 'secondary'
-                  }
-                  className={cn(
-                    'flex items-center gap-1',
-                    isRunning && 'bg-blue-100 text-blue-700 hover:bg-blue-100'
-                  )}
-                >
-                  {toolCall.status === 'running' && <PulsingDots />}
-                  {toolCall.status === 'completed' && (
-                    <CheckCircle className="h-3 w-3" />
-                  )}
-                  {toolCall.status === 'failed' && <XCircle className="h-3 w-3" />}
-                  <span>{getStatusLabel(toolCall.status, toolCall.toolName)}</span>
-                </Badge>
+                {/* Show Download button for completed ppt_generator, otherwise show status badge */}
+                {toolCall.toolName === 'ppt_generator' && 
+                 toolCall.status === 'completed' && 
+                 toolCall.result?.artifacts?.[0]?.fileId ? (
+                  <button
+                    onClick={(e) => handleDownload(
+                      e, 
+                      sessionId, 
+                      toolCall.result?.artifacts?.[0]?.fileId, 
+                      toolCall.result?.artifacts?.[0]?.name || 'presentation.pptx'
+                    )}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded hover:bg-primary/90 transition-colors cursor-pointer"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download PPT
+                  </button>
+                ) : (
+                  <Badge
+                    variant={
+                      toolCall.status === 'completed'
+                        ? 'default'
+                        : toolCall.status === 'failed'
+                        ? 'destructive'
+                        : 'secondary'
+                    }
+                    className={cn(
+                      'flex items-center gap-1',
+                      isRunning && 'bg-blue-100 text-blue-700 hover:bg-blue-100'
+                    )}
+                  >
+                    {toolCall.status === 'running' && <PulsingDots />}
+                    {toolCall.status === 'completed' && (
+                      <CheckCircle className="h-3 w-3" />
+                    )}
+                    {toolCall.status === 'failed' && <XCircle className="h-3 w-3" />}
+                    <span>{getStatusLabel(toolCall.status, toolCall.toolName)}</span>
+                  </Badge>
+                )}
               </div>
             </CardHeader>
 
@@ -147,7 +198,8 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
                   <div className="text-xs font-medium text-muted-foreground mb-1">
                     Parameters:
                   </div>
-                  {isRunning && toolCall.status === 'running' ? (
+                  {/* Show shimmer only if running AND no params yet */}
+                  {isRunning && (!toolCall.params || Object.keys(toolCall.params).length === 0) ? (
                     <Shimmer className="h-20 rounded w-full" />
                   ) : (
                     <SyntaxHighlighter
