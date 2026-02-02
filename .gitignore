@@ -49,6 +49,10 @@ apps/api/prisma/*.db-journal
 # Workspaces
 /workspaces/
 
+# Generated outputs
+/outputs/
+/tmp/
+
 # Misc
 *.tsbuildinfo
 .cache/
