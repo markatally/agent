@@ -9,8 +9,8 @@
 | Field | Value |
 |-------|-------|
 | **Last Updated** | 2026-02-04 |
-| **Active Phase** | Phase 8 - External Skill Sync System |
-| **Status** | ✅ Complete |
+| **Active Phase** | Phase 9 - Platform-Grade External Skills |
+| **Status** | 🔄 In Progress |
 | **Blocked By** | None |
 
 ### Quick Summary
@@ -24,13 +24,82 @@ The Mark Agent is a **complete full-stack AI agent system** with:
 - ✅ 31 agent skills (slash commands)
 - ✅ React frontend with real-time SSE streaming
 - ✅ External skill synchronization system (multi-repo, deduplicated, protected)
+- 🔄 Platform-grade external skills (contracts, policy-driven execution, observability)
 - ✅ 282 tests passing (unit + integration)
 
-**Latest Architecture Addition:** External Skill Synchronization System for pulling, normalizing, and safely upserting skills from open-source repositories with runtime snapshot isolation.
+**Current Work:** Upgrading external skills from engineering implementation to platform-grade agent system with versioned contracts, policy-driven runtimes, execution context boundaries, and full observability.
 
 ---
 
 ## Active Focus
+
+### Phase 9: Platform-Grade External Skills Integration 🔄 IN PROGRESS
+
+**Goal:** Transform external skills into a scalable, governable Agent platform with canonical contracts, policy-driven execution, and agent-level observability.
+
+**Hard Requirements (Platform Constraints):**
+
+| Constraint | Enforcement |
+|-----------|-------------|
+| Contract Evolution | `ExternalSkillContract` with `CONTRACT_VERSION`; breaking changes = major version bump |
+| Version Validation | Registry validates at registration; runtime rejects incompatible (NO silent fallback) |
+| Execution Context Boundary | Versioned, immutable `ExecutionContext`; runtimes receive explicitly (no global access) |
+| Context Shape Enforcement | `validateExecutionContext()` + tests verify all required fields |
+
+**Sub-Phases:**
+
+| Phase | Component | Status |
+|-------|-----------|--------|
+| 9.0 | External Skill Contract with versioning | ⏳ Pending |
+| 9.0 | Contract Version Validator | ⏳ Pending |
+| 9.0 | Versioned ExecutionContext | ⏳ Pending |
+| 9.1 | Prisma schema upgrade (observability + contractVersion) | ⏳ Pending |
+| 9.1 | Export new services | ⏳ Pending |
+| 9.2 | ExecutionPolicyResolver | ⏳ Pending |
+| 9.2 | SkillRuntime architecture + registry | ⏳ Pending |
+| 9.2 | Refactor executors to runtimes | ⏳ Pending |
+| 9.3 | LLM integration in PromptRuntime | ⏳ Pending |
+| 9.4 | Agent-level behavior tests | ⏳ Pending |
+| 9.4 | Contract version tests | ⏳ Pending |
+| 9.4 | ExecutionContext shape tests | ⏳ Pending |
+| 9.4 | Runtime isolation tests | ⏳ Pending |
+| 9.5 | Execution tracing (traceId, parentExecutionId) | ⏳ Pending |
+| 9.5 | Execution logger | ⏳ Pending |
+| 9.6 | Database migration | ⏳ Pending |
+
+**Files to Create (18 new):**
+
+| File | Purpose |
+|------|---------|
+| `packages/shared/src/external-skill-contract.ts` | Canonical contract with `CONTRACT_VERSION` |
+| `packages/shared/src/contract-validator.ts` | Version validation (registry + runtime) |
+| `packages/shared/src/execution-context.ts` | Versioned, immutable `ExecutionContext` |
+| `apps/api/src/services/skills/policy-resolver.ts` | Policy resolution |
+| `apps/api/src/services/skills/runtimes/types.ts` | Runtime interfaces |
+| `apps/api/src/services/skills/runtimes/registry.ts` | Runtime registry |
+| `apps/api/src/services/skills/runtimes/prompt-runtime.ts` | LLM runtime |
+| `apps/api/src/services/skills/runtimes/index.ts` | Runtime exports |
+| `apps/api/src/services/skills/tracing.ts` | Trace context factory |
+| `apps/api/src/services/skills/execution-logger.ts` | Execution logging |
+| `tests/behavior/multi_skill_chain.test.ts` | Chain tests |
+| `tests/behavior/failure_fallback.test.ts` | Fallback tests |
+| `tests/behavior/schema_violation.test.ts` | Schema tests |
+| `tests/unit/contract-version.test.ts` | Contract evolution tests |
+| `tests/unit/execution-context.test.ts` | Context shape tests |
+| `tests/unit/runtime-context-isolation.test.ts` | Isolation tests |
+
+**Success Criteria:**
+
+- [ ] Contract version enforced at runtime (throws `IncompatibleContractError`)
+- [ ] No silent fallback (tests verify rejection)
+- [ ] ExecutionContext versioned and immutable (`Object.isFrozen()`)
+- [ ] Runtimes isolated (no route imports, only context access)
+- [ ] Context shape enforced with tests
+- [ ] All services depend on `ExternalSkillContract`
+- [ ] No hard-coded execution values in runtimes
+- [ ] Observable executions (traceId, errorType, metrics)
+
+---
 
 ### Phase 8: External Skill Synchronization System ✅ COMPLETE
 
@@ -100,47 +169,83 @@ The Mark Agent is a **complete full-stack AI agent system** with:
 
 ## Next Steps (Executable Plan)
 
-### Immediate (This Session) - COMPLETED ✅
+### Immediate (This Session) - Phase 9.0
 
-1. ~~**Wire LangGraph into stream.ts** (non-breaking)~~ ✅
-   - Added new route: `POST /api/sessions/:id/agent` for graph-based execution
-   - Existing `POST /api/sessions/:id/chat` unchanged (backward compatible)
-   - AgentRouter integrates with existing tools and LLM client
+1. **Define External Skill Contract**
+   - Create `packages/shared/src/external-skill-contract.ts`
+   - Add `CONTRACT_VERSION` constant with semver
+   - Define `ExternalSkillContract` interface with `contractVersion` field
+   - Add `ExecutionErrorType` with `VERSION` type
+   - Add `IncompatibleContractError` class
 
-2. ~~**Add intent detection**~~ ✅
-   - IntentParsingNode classifies user prompts
-   - Routes to appropriate scenario graph based on classification
+2. **Create Contract Version Validator**
+   - Create `packages/shared/src/contract-validator.ts`
+   - Implement `validateAtRegistration()` (allows registration, warns)
+   - Implement `validateAtRuntime()` (THROWS on incompatible, no fallback)
+   - Add semver comparison logic
 
-### Short-Term (Next Sessions)
+3. **Define ExecutionContext**
+   - Create `packages/shared/src/execution-context.ts`
+   - Add `EXECUTION_CONTEXT_VERSION` constant
+   - Define immutable `ExecutionContext` interface (all fields `readonly`)
+   - Create `createExecutionContext()` factory with `Object.freeze()`
+   - Add `validateExecutionContext()` shape validator
 
-3. **Test research flow end-to-end**
-   - Verify paper discovery with web_search tool
-   - Verify claim synthesis with citation validation
-   - Test validation gates (minimum 3 papers)
+4. **Update Shared Package Exports**
+   - Export contract, validator, context from `packages/shared/src/index.ts`
 
-4. **Frontend integration**
-   - Add API client method for `/agent` endpoint
-   - Display graph execution progress (node-by-node)
-   - Show validation results and errors
-   - Handle `agent.node` and `agent.error` SSE events
+### Phase 9.1 - Schema & Services
 
-5. **Implement remaining scenario nodes**
-   - PPT: OutlineGeneration, SlideContent, PPTExport nodes
-   - Summary: ContentChunk, KeyExtract, SummaryGenerate nodes
+5. **Update Prisma Schema**
+   - Add `UserExternalSkill` model
+   - Add `ExternalSkillExecution` model with tracing fields
+   - Add `contractVersion` to `ExternalSkill`
+   - Generate Prisma client
 
-### Medium-Term
+6. **Export New Services**
+   - Update `apps/api/src/services/skills/index.ts`
 
-6. **Add checkpoint/resume capability**
-   - Save graph state to database
-   - Allow resumption from checkpoints
+### Phase 9.2 - Policy-Driven Runtimes
 
-7. **Performance optimization**
-   - Parallel node execution where safe
-   - Caching for repeated operations
+7. **Create Policy Resolver**
+   - Implement `ExecutionPolicyResolver` with tier-based defaults
 
-8. **Additional scenario graphs**
-   - Code review graph
-   - Documentation generation graph
+8. **Build Runtime Architecture**
+   - Create runtime interfaces using `ExecutionContext`
+   - Build runtime registry
+   - Refactor existing executors to new runtime pattern
+
+### Phase 9.3 - LLM Integration
+
+9. **Connect LLM to PromptRuntime**
+   - Integrate with existing `LLMClient`
+   - Add timeout enforcement
+   - Add retry logic with exponential backoff
+   - Add output validation
+
+### Phase 9.4 - Testing
+
+10. **Create Behavior Tests**
+    - Multi-skill chaining
+    - Failure fallback
+    - Schema violation
+
+11. **Create Platform Constraint Tests** (CRITICAL)
+    - Contract version enforcement tests
+    - ExecutionContext shape tests
+    - Runtime isolation tests
+
+### Phase 9.5 - Observability
+
+12. **Implement Tracing**
+    - Create trace context factory
+    - Build execution logger
+
+### Phase 9.6 - Migration
+
+13. **Run Database Migration**
+    - Execute migration
+    - Verify all tables created
 
 ---
 
@@ -261,6 +366,28 @@ bun run sync:skills --unprotect=<id>  # Unprotect skill
 
 <details>
 <summary>Click to expand session history</summary>
+
+### Session 12 — 2026-02-04
+
+**Platform-Grade External Skills Integration (Phase 9):**
+- Reviewed existing external skills implementation (9 files)
+- Created comprehensive plan for platform-grade upgrade
+- Defined two hard platform constraints:
+  - Contract Evolution Rule (versioned with explicit validation)
+  - ExecutionContext Boundary (immutable, versioned, explicit passing)
+- Structured Phase 9 with 6 sub-phases (9.0-9.6)
+- Updated PROGRESS.md with Phase 9 details and todos
+- Plan includes:
+  - 18 new files to create
+  - 4 files to modify
+  - 8 success criteria (platform constraints + functional)
+  - Complete test coverage (unit, integration, behavior)
+
+**Plan Created:**
+- `.cursor/plans/complete_external_skills_integration_a0b9988c.plan.md`
+- Phases: Contract definition → Schema upgrade → Runtimes → LLM → Tests → Tracing → Migration
+
+**Next:** Begin Phase 9.0 implementation (contract + validator + context)
 
 ### Session 11 — 2026-02-04
 
