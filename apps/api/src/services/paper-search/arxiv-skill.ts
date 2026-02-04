@@ -153,12 +153,18 @@ export const ArxivSearchSkill: PaperSearchSkill = {
         authors: authorNames.length > 0 ? authorNames : ['Unknown'],
         abstract: summaryMatch ? stripHtml(summaryMatch[1]).slice(0, 1000) : undefined,
         link,
+        url: link,
         source: 'arxiv',
         arxivId: arxivId || null,
         publicationDate,
+        publicationDateSource: 'arxiv_v1',
         venue: 'arXiv',
       });
     }
     return results;
+  },
+
+  async resolveByDoi(): Promise<RawPaperResult | null> {
+    return null;
   },
 };

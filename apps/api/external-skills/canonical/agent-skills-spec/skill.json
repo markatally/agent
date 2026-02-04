@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "agent-skills-spec",
+  "kind": "prompt",
+  "source": "github",
   "name": "Agent Skills Spec",
   "description": "The spec is now located at <https://agentskills.io/specification>",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/anthropics/skills.git",
     "repoPath": "spec/agent-skills-spec.md",
-    "syncedAt": "2026-02-04T10:44:51.204Z"
+    "syncedAt": "2026-02-04T15:34:38.443Z"
   },
   "isProtected": false
 }

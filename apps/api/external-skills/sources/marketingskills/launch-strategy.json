@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "launch-strategy",
+  "kind": "prompt",
+  "source": "github",
   "name": "launch-strategy",
   "description": "\"When the user wants to plan a product launch, feature announcement, or release strategy. Also use when the user mentions 'launch,' 'Product Hunt,' 'feature release,' 'announcement,' 'go-to-market,' 'beta launch,' 'early access,' 'waitlist,' or 'product update.' This skill covers phased launches, channel strategy, and ongoing launch momentum.\"",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/launch-strategy/SKILL.md",
-    "syncedAt": "2026-02-04T10:44:54.337Z"
+    "syncedAt": "2026-02-04T15:34:42.935Z"
   },
   "isProtected": false
 }

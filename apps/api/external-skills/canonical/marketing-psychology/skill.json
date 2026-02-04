@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "marketing-psychology",
+  "kind": "prompt",
+  "source": "github",
   "name": "marketing-psychology",
   "description": "\"When the user wants to apply psychological principles, mental models, or behavioral science to marketing. Also use when the user mentions 'psychology,' 'mental models,' 'cognitive bias,' 'persuasion,' 'behavioral science,' 'why people buy,' 'decision-making,' or 'consumer behavior.' This skill provides 70+ mental models organized for marketing application.\"",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/marketing-psychology/SKILL.md",
-    "syncedAt": "2026-02-04T10:44:54.335Z"
+    "syncedAt": "2026-02-04T15:34:42.935Z"
   },
   "isProtected": false
 }

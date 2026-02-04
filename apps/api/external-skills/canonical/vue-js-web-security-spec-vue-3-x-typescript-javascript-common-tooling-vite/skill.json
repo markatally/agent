@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "vue-js-web-security-spec-vue-3-x-typescript-javascript-common-tooling-vite",
+  "kind": "prompt",
+  "source": "github",
   "name": "Vue.js Web Security Spec (Vue 3.x, TypeScript/JavaScript, common tooling: Vite)",
   "description": "This document is designed as a **security spec** that supports:",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/security-best-practices/references/javascript-typescript-vue-web-frontend-security.md",
-    "syncedAt": "2026-02-04T10:44:53.209Z"
+    "syncedAt": "2026-02-04T15:34:41.426Z"
   },
   "isProtected": false
 }

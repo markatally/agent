@@ -64,7 +64,13 @@ files.post('/sessions/:sessionId/files', async (c) => {
   }
 
   const file = body.get('file');
-  if (!file || !(file instanceof File)) {
+  const isFileLike =
+    !!file &&
+    typeof file === 'object' &&
+    'name' in file &&
+    'size' in file &&
+    'arrayBuffer' in file;
+  if (!isFileLike) {
     return c.json(
       {
         error: {
@@ -76,8 +82,10 @@ files.post('/sessions/:sessionId/files', async (c) => {
     );
   }
 
+  const upload = file as File;
+
   // Validate file
-  const validation = validateFile(file.name, file.size);
+  const validation = validateFile(upload.name, upload.size);
   if (!validation.valid) {
     return c.json(
       {
@@ -97,8 +105,8 @@ files.post('/sessions/:sessionId/files', async (c) => {
 
   try {
     // Save file
-    const arrayBuffer = await file.arrayBuffer();
-    const metadata = await saveFile(sessionId, workspaceDir, file.name, arrayBuffer);
+    const arrayBuffer = await upload.arrayBuffer();
+    const metadata = await saveFile(sessionId, workspaceDir, upload.name, arrayBuffer);
 
     // Save to database
     const dbFile = await prisma.file.create({

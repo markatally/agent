@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "marketing-ideas",
+  "kind": "prompt",
+  "source": "github",
   "name": "marketing-ideas",
   "description": "\"When the user needs marketing ideas, inspiration, or strategies for their SaaS or software product. Also use when the user asks for 'marketing ideas,' 'growth ideas,' 'how to market,' 'marketing strategies,' 'marketing tactics,' 'ways to promote,' or 'ideas to grow.' This skill provides 139 proven marketing approaches organized by category.\"",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/marketing-ideas/SKILL.md",
-    "syncedAt": "2026-02-04T10:44:54.339Z"
+    "syncedAt": "2026-02-04T15:34:42.936Z"
   },
   "isProtected": false
 }

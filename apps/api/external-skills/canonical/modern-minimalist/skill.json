@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "modern-minimalist",
+  "kind": "prompt",
+  "source": "github",
   "name": "Modern Minimalist",
   "description": "A clean and contemporary theme with a sophisticated grayscale palette for maximum versatility.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/anthropics/skills.git",
     "repoPath": "skills/theme-factory/themes/modern-minimalist.md",
-    "syncedAt": "2026-02-04T10:44:51.206Z"
+    "syncedAt": "2026-02-04T15:34:38.444Z"
   },
   "isProtected": false
 }

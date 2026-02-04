@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "next-js-typescript-javascript-web-security-spec-next-js-16-1-x-node-js-20-9",
+  "kind": "prompt",
+  "source": "github",
   "name": "Next.js (TypeScript/JavaScript) Web Security Spec (Next.js 16.1.x, Node.js 20.9+)",
   "description": "This document is designed as a **security spec** that supports:",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/security-best-practices/references/javascript-typescript-nextjs-web-server-security.md",
-    "syncedAt": "2026-02-04T10:44:53.210Z"
+    "syncedAt": "2026-02-04T15:34:41.427Z"
   },
   "isProtected": false
 }

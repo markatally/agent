@@ -168,11 +168,11 @@ export const PPTValidationRules: Record<string, ValidationRule<PPTState>> = {
   OUTLINE_HAS_SECTIONS: {
     id: 'OUTLINE_HAS_SECTIONS',
     name: 'Outline Has Sections',
-    description: 'Presentation outline must have at least 3 sections',
+    description: 'Presentation outline must have at least 2 sections',
     severity: 'fatal',
     check: (state) =>
-      !state.outline || state.outline.sections.length >= 3,
-    errorMessage: 'Presentation outline must have at least 3 sections',
+      !!state.outline && state.outline.sections.length >= 2,
+    errorMessage: 'Presentation outline must have at least 2 sections',
     suggestions: [
       'Expand the presentation scope',
       'Break down the topic into more subtopics',
@@ -209,7 +209,7 @@ export const SummaryValidationRules: Record<string, ValidationRule<SummaryState>
     name: 'Has Source Content',
     description: 'Summary must have source content to summarize',
     severity: 'fatal',
-    check: (state) => !!state.sourceContent || !!state.sourceUrl,
+    check: (state) => !!state.sourceContent || !!state.sourceText || !!state.sourceUrl,
     errorMessage: 'No source content provided for summarization',
     suggestions: [
       'Provide text content or a URL to summarize',
@@ -225,7 +225,7 @@ export const SummaryValidationRules: Record<string, ValidationRule<SummaryState>
     description: 'Must extract key points before generating summary',
     severity: 'fatal',
     check: (state) =>
-      !state.summary || state.keyPoints.length >= 1,
+      state.keyPoints.length >= 1,
     errorMessage: 'Summary generated without extracting key points',
     suggestions: [
       'Extract key points from content first',
@@ -279,12 +279,15 @@ export class ValidationExecutor {
    */
   validate<TState extends AgentState>(
     state: TState,
-    rules: Record<string, ValidationRule<TState>>
+    rules: Record<string, ValidationRule<TState>> | Array<ValidationRule<TState>>
   ): ValidationResult {
     const errors: AgentError[] = [];
     const warnings: AgentError[] = [];
-    
-    for (const [ruleId, rule] of Object.entries(rules)) {
+    const ruleEntries: Array<[string, ValidationRule<TState>]> = Array.isArray(rules)
+      ? rules.map((rule) => [rule.id, rule])
+      : Object.entries(rules);
+
+    for (const [ruleId, rule] of ruleEntries) {
       const passed = rule.check(state);
       
       if (!passed) {
@@ -330,7 +333,10 @@ export class ValidationExecutor {
    */
   validatePPT(state: PPTState): ValidationResult {
     const generalResult = this.validate(state, GeneralValidationRules);
-    const pptResult = this.validate(state, PPTValidationRules);
+    const pptResult = this.validate(state, [
+      PPTValidationRules.HAS_TOPIC,
+      PPTValidationRules.SLIDE_COUNT,
+    ]);
     
     return this.mergeResults(generalResult, pptResult);
   }

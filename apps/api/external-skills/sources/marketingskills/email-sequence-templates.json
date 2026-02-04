@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "email-sequence-templates",
+  "kind": "prompt",
+  "source": "github",
   "name": "Email Sequence Templates",
   "description": "Detailed templates for common email sequences.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/email-sequence/references/sequence-templates.md",
-    "syncedAt": "2026-02-04T10:44:54.346Z"
+    "syncedAt": "2026-02-04T15:34:42.937Z"
   },
   "isProtected": false
 }

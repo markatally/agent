@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "skill-creator",
+  "kind": "prompt",
+  "source": "github",
   "name": "skill-creator",
   "description": "Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.system/skill-creator/SKILL.md",
-    "syncedAt": "2026-02-04T10:44:53.203Z"
+    "syncedAt": "2026-02-04T15:34:41.425Z"
   },
   "isProtected": false
 }

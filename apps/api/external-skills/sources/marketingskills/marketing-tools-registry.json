@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "marketing-tools-registry",
+  "kind": "prompt",
+  "source": "github",
   "name": "Marketing Tools Registry",
   "description": "Quick reference for AI agents to discover tool capabilities and integration methods.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "tools/REGISTRY.md",
-    "syncedAt": "2026-02-04T10:44:54.334Z"
+    "syncedAt": "2026-02-04T15:34:42.935Z"
   },
   "isProtected": false
 }

@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "node-typescript-mcp-server-implementation-guide",
+  "kind": "prompt",
+  "source": "github",
   "name": "Node/TypeScript MCP Server Implementation Guide",
   "description": "This document provides Node/TypeScript-specific best practices and examples for implementing MCP servers using the MCP TypeScript SDK. It covers project structure, server setup, tool registration patterns, input validation with Zod, error handling, and complete working examples.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/anthropics/skills.git",
     "repoPath": "skills/mcp-builder/reference/node_mcp_server.md",
-    "syncedAt": "2026-02-04T10:44:51.212Z"
+    "syncedAt": "2026-02-04T15:34:38.445Z"
   },
   "isProtected": false
 }

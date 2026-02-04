@@ -22,6 +22,8 @@ export interface RawPaperResult {
   abstract?: string;
   /** Canonical link (arXiv abs, Semantic Scholar, etc.) */
   link: string;
+  /** Legacy alias for link */
+  url?: string;
   /** Source skill id, e.g. 'arxiv', 'semantic_scholar', 'crossref' */
   source: string;
   /** DOI if known */
@@ -32,6 +34,8 @@ export interface RawPaperResult {
   semanticScholarId?: string | null;
   /** Publication date YYYY-MM-DD from this source; may be year-only (YYYY-01-01) */
   publicationDate?: string | null;
+  /** Source of publication date */
+  publicationDateSource?: PublicationDateSource;
   /** Venue/journal name */
   venue?: string | null;
   /** Citation count when available */

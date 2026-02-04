@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "free-tool-types-reference",
+  "kind": "prompt",
+  "source": "github",
   "name": "Free Tool Types Reference",
   "description": "Detailed guide to each type of marketing tool you can build.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/free-tool-strategy/references/tool-types.md",
-    "syncedAt": "2026-02-04T10:44:54.341Z"
+    "syncedAt": "2026-02-04T15:34:42.936Z"
   },
   "isProtected": false
 }

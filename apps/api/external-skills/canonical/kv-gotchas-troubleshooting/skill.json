@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "kv-gotchas-troubleshooting",
+  "kind": "prompt",
+  "source": "github",
   "name": "KV Gotchas & Troubleshooting",
   "description": "**Cause:** Eventual consistency means writes may not be immediately visible in other regions",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/kv/gotchas.md",
-    "syncedAt": "2026-02-04T10:44:53.220Z"
+    "syncedAt": "2026-02-04T15:34:41.430Z"
   },
   "isProtected": false
 }

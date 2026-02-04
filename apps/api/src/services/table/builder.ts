@@ -118,7 +118,7 @@ export function tableFromObjects<T extends Record<string, TableCellValue>>(
 
   // Build rows
   const rows: TableRow[] = data.map(obj =>
-    columnIds.map(id => obj[id])
+    columnIds.map(id => (Object.prototype.hasOwnProperty.call(obj, id) ? obj[id] : null))
   );
 
   return {
@@ -187,11 +187,24 @@ export function comparisonTable(
  * @returns Render result
  */
 export async function validateAndRender(
-  table: TableData,
-  maxRetries: number = 0,
+  tableOrFactory: TableData | (() => TableData | Promise<TableData>),
+  maxRetriesOrOptions: number | { maxRetries?: number; onRetry?: (errors: string[], attempt: number) => Promise<TableData> } = 0,
   onRetry?: (errors: string[], attempt: number) => Promise<TableData>
 ): Promise<TableRenderResult> {
-  let currentTable = table;
+  const options = typeof maxRetriesOrOptions === 'number'
+    ? { maxRetries: maxRetriesOrOptions, onRetry }
+    : maxRetriesOrOptions;
+  const maxRetries = options.maxRetries ?? 0;
+  const retryHandler = options.onRetry;
+
+  const getInitialTable = async () => {
+    if (typeof tableOrFactory === 'function') {
+      return await tableOrFactory();
+    }
+    return tableOrFactory;
+  };
+
+  let currentTable = await getInitialTable();
   let attempt = 0;
 
   while (attempt <= maxRetries) {
@@ -202,20 +215,25 @@ export async function validateAndRender(
     }
 
     // If no retry callback or max retries reached, return the failed result
-    if (!onRetry || attempt >= maxRetries) {
+    if (attempt >= maxRetries) {
       return result;
     }
 
     // Attempt regeneration
     attempt++;
     try {
-      currentTable = await onRetry(result.validation.errors, attempt);
+      if (retryHandler) {
+        currentTable = await retryHandler(result.validation.errors, attempt);
+      } else if (typeof tableOrFactory === 'function') {
+        currentTable = await tableOrFactory();
+      } else {
+        return result;
+      }
     } catch {
       // If regeneration fails, return the original error
       return result;
     }
   }
 
-  // This shouldn't be reached, but TypeScript needs it
   return renderTable(currentTable);
 }

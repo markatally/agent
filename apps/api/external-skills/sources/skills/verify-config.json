@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "verify-config",
+  "kind": "prompt",
+  "source": "github",
   "name": "Verify config",
   "description": "**Cause:** Observability disabled, Worker not redeployed, no traffic, low sampling rate, or log size exceeds 256 KB",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/observability/gotchas.md",
-    "syncedAt": "2026-02-04T10:44:53.231Z"
+    "syncedAt": "2026-02-04T15:34:41.433Z"
   },
   "isProtected": false
 }

@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "ocean-depths",
+  "kind": "prompt",
+  "source": "github",
   "name": "Ocean Depths",
   "description": "A professional and calming maritime theme that evokes the serenity of deep ocean waters.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/anthropics/skills.git",
     "repoPath": "skills/theme-factory/themes/ocean-depths.md",
-    "syncedAt": "2026-02-04T10:44:51.207Z"
+    "syncedAt": "2026-02-04T15:34:38.444Z"
   },
   "isProtected": false
 }

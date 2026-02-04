@@ -12,6 +12,7 @@ import { streamRoutes } from './routes/stream';
 import { fileRoutes } from './routes/files';
 import { skillRoutes } from './routes/skills';
 import { externalSkillRoutes } from './routes/external-skills';
+import { userSkillRoutes } from './routes/user-skills';
 
 const app = new Hono();
 
@@ -43,6 +44,7 @@ app.route('/api', streamRoutes); // SSE streaming endpoints
 app.route('/api', fileRoutes); // File upload/download endpoints
 app.route('/api/skills', skillRoutes); // Skill listing and invocation
 app.route('/api/external-skills', externalSkillRoutes);
+app.route('/api/user-skills', userSkillRoutes); // User skill preferences
 
 // 404 handler
 app.notFound((c) => {

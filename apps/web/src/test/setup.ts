@@ -7,12 +7,21 @@ afterEach(() => {
   cleanup();
 });
 
-// Mock localStorage
+// Mock localStorage with in-memory backing store
+const localStorageStore = new Map<string, string>();
 const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
+  getItem: vi.fn((key: string) =>
+    localStorageStore.has(key) ? localStorageStore.get(key)! : null
+  ),
+  setItem: vi.fn((key: string, value: string) => {
+    localStorageStore.set(key, String(value));
+  }),
+  removeItem: vi.fn((key: string) => {
+    localStorageStore.delete(key);
+  }),
+  clear: vi.fn(() => {
+    localStorageStore.clear();
+  }),
 };
 
-global.localStorage = localStorageMock as any;
+globalThis.localStorage = localStorageMock as any;

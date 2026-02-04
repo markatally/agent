@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "google-tag-manager-implementation-reference",
+  "kind": "prompt",
+  "source": "github",
   "name": "Google Tag Manager Implementation Reference",
   "description": "Detailed guide for implementing tracking via Google Tag Manager.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/analytics-tracking/references/gtm-implementation.md",
-    "syncedAt": "2026-02-04T10:44:54.342Z"
+    "syncedAt": "2026-02-04T15:34:42.936Z"
   },
   "isProtected": false
 }

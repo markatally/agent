@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "cloudflare-workers-analytics-engine-reference",
+  "kind": "prompt",
+  "source": "github",
   "name": "Cloudflare Workers Analytics Engine Reference",
   "description": "Expert guidance for implementing unlimited-cardinality analytics at scale using Cloudflare Workers Analytics Engine.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/analytics-engine/README.md",
-    "syncedAt": "2026-02-04T10:44:53.228Z"
+    "syncedAt": "2026-02-04T15:34:41.432Z"
   },
   "isProtected": false
 }

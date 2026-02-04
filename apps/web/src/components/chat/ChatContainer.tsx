@@ -5,6 +5,7 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ToolCallDisplay } from './ToolCallDisplay';
 import { ArtifactDisplay } from './ArtifactDisplay';
+import { SkillsConfigModal } from '../skills/SkillsConfigModal';
 import { apiClient, type SSEEvent, ApiError } from '../../lib/api';
 import { useChatStore } from '../../stores/chatStore';
 import { useSession } from '../../hooks/useSessions';
@@ -17,6 +18,7 @@ interface ChatContainerProps {
 export function ChatContainer({ sessionId }: ChatContainerProps) {
   const [isSending, setIsSending] = useState(false);
   const [files, setFiles] = useState<import('@mark/shared').Artifact[]>([]);
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -272,7 +274,11 @@ export function ChatContainer({ sessionId }: ChatContainerProps) {
         onSend={handleSendMessage} 
         disabled={isSending || !isSessionValid}
         sendDisabled={isStreaming}
+        onSkillsClick={() => setSkillsModalOpen(true)}
       />
+
+      {/* Skills configuration modal */}
+      <SkillsConfigModal open={skillsModalOpen} onOpenChange={setSkillsModalOpen} />
     </div>
   );
 }

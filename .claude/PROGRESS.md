@@ -9,7 +9,7 @@
 | Field | Value |
 |-------|-------|
 | **Last Updated** | 2026-02-04 |
-| **Active Phase** | Phase 9 - Platform-Grade External Skills |
+| **Active Phase** | Phase 10 - Chat Input UI & Skills Configuration |
 | **Status** | ✅ Complete |
 | **Blocked By** | None |
 
@@ -26,12 +26,110 @@ The Mark Agent is a **complete full-stack AI agent system** with:
 - ✅ External skill synchronization system (multi-repo, deduplicated, protected)
 - ✅ Platform-grade external skills (contracts, policy-driven execution, observability)
 - ✅ 282 tests passing (unit + integration)
+- ✅ Chat Input UI with Skills configuration (centered layout, user-level preferences)
 
-**Latest Architecture Addition:** Platform-grade external skills with versioned contract enforcement, policy-driven runtimes, and execution tracing.
+**Latest Architecture Addition:** Chat Input UI with centered layout, "+" menu, and user-level Skills configuration modal with per-user skill filtering at runtime.
 
 ---
 
 ## Active Focus
+
+### Phase 10: Chat Input UI & Skills Configuration ✅ COMPLETE
+
+**Goal:** Implement a ChatGPT/Manus-style chat input UI and a user-level Skills configuration flow, wired to the existing external-skills system.
+
+**Hard Constraints (Enforced):**
+
+| Constraint | Enforcement |
+|------------|-------------|
+| No new database tables | Use existing `UserExternalSkill` model only |
+| No new sync logic | Do not modify external skill synchronization |
+| No skill contract changes | Do not modify `ExternalSkillContract` or canonical IDs |
+| No global state in skill resolution | Pass explicit `ExecutionContext` only |
+| Runtime boundary | All skill filtering in `DynamicSkillRegistry`, not `stream.ts` |
+
+**Architecture Decisions:**
+
+| Decision | Rationale |
+|----------|-----------|
+| Frontend uses GET + PUT only | Single bulk update simplifies state management |
+| Skills ordered by `enabledAt` | Deterministic ordering prevents non-deterministic agent behavior |
+| Empty skill set = LLM-only mode | No implicit auto-enablement; explicit guardrail |
+| Observability at resolution time | Log `userId`, `traceId`, `enabledCanonicalIds[]` |
+
+**Sub-Phases:**
+
+| Phase | Component | Status |
+|-------|-----------|--------|
+| 10.1 | Backend: Create `/api/user-skills` endpoints (GET + PUT for UI) | ✅ Complete |
+| 10.1 | Backend: Register routes in index.ts | ✅ Complete |
+| 10.2 | Backend: Add `getEnabledSkillsForUser()` to dynamic-registry.ts | ✅ Complete |
+| 10.2 | Backend: Wire stream.ts to use registry method (no direct DB) | ✅ Complete |
+| 10.3 | Frontend: Update ChatInput.tsx (centered, "+" menu) | ✅ Complete |
+| 10.3 | Frontend: Add shadcn/ui Switch component | ✅ Complete |
+| 10.4 | Frontend: Create SkillsConfigModal.tsx | ✅ Complete |
+| 10.4 | Frontend: Add userSkillsApi (list + update) to api.ts | ✅ Complete |
+| 10.4 | Frontend: Create useUserSkills.ts React Query hooks | ✅ Complete |
+
+**Conflict Resolution Rules:**
+
+| Scenario | Behavior |
+|----------|----------|
+| User has no skills enabled | Agent operates in LLM-only mode |
+| User removes skill during active session | Current request completes; next uses new state |
+| Skill in user's set no longer exists | Skip silently |
+| User has skills but all disabled | Same as no skills - LLM-only mode |
+
+**Files to Create:**
+
+| File | Purpose |
+|------|---------|
+| `apps/api/src/routes/user-skills.ts` | CRUD for user skill preferences |
+| `apps/web/src/components/ui/switch.tsx` | shadcn Switch component |
+| `apps/web/src/components/skills/SkillsConfigModal.tsx` | Skills configuration modal |
+| `apps/web/src/hooks/useUserSkills.ts` | React Query hooks for user skills |
+
+**Files to Modify:**
+
+| File | Changes |
+|------|---------|
+| `apps/api/src/index.ts` | Register `/api/user-skills` route |
+| `apps/api/src/services/skills/dynamic-registry.ts` | Add `getEnabledSkillsForUser()` with ordering + logging |
+| `apps/api/src/routes/stream.ts` | Call registry method only (no direct DB queries) |
+| `apps/web/src/components/chat/ChatInput.tsx` | Center layout, add "+" dropdown menu |
+| `apps/web/src/lib/api.ts` | Add `userSkillsApi` (list + update only) |
+
+**Data Flow:**
+
+```
+User opens Skills modal
+  → GET /api/external-skills (all available skills)
+  → GET /api/user-skills (user's skill preferences)
+  → Display combined list with add/remove/toggle controls
+
+User saves changes
+  → PUT /api/user-skills (bulk update preferences)
+  → Persist to UserExternalSkill table
+
+Agent executes chat
+  → stream.ts calls registry.getEnabledSkillsForUser(userId)
+  → Registry queries DB, orders by enabledAt, logs resolution
+  → Returns filtered skills (or empty array for LLM-only mode)
+  → Execute with filtered skills only
+```
+
+**Success Criteria:**
+
+- [x] Chat input is centered (~40% width) with "+" button on left
+- [x] "+" opens menu containing "Skills"
+- [x] "Skills" opens modal with search, filter, skill list
+- [x] Each skill has add/remove and enable/disable controls
+- [x] Saving persists user state to database
+- [x] In chat, only enabled user skills affect the agent
+- [x] Empty skill set results in LLM-only mode (no implicit enablement)
+- [x] Skills ordered deterministically by enabledAt
+
+---
 
 ### Phase 9: Platform-Grade External Skills Integration ✅ COMPLETE
 
@@ -169,83 +267,62 @@ The Mark Agent is a **complete full-stack AI agent system** with:
 
 ## Next Steps (Executable Plan)
 
-### Immediate (This Session) - Phase 9.0
+### Immediate (This Session) - Phase 10.1: Backend User Skills API
 
-1. **Define External Skill Contract**
-   - Create `packages/shared/src/external-skill-contract.ts`
-   - Add `CONTRACT_VERSION` constant with semver
-   - Define `ExternalSkillContract` interface with `contractVersion` field
-   - Add `ExecutionErrorType` with `VERSION` type
-   - Add `IncompatibleContractError` class
+1. **Create User Skills Routes**
+   - Create `apps/api/src/routes/user-skills.ts`
+   - Implement `GET /api/user-skills` - Get user's skills with enabled state (UI)
+   - Implement `PUT /api/user-skills` - Bulk update user's skill preferences (UI)
+   - Implement `POST /api/user-skills/:canonicalId` - Add skill (internal API)
+   - Implement `DELETE /api/user-skills/:canonicalId` - Remove skill (internal API)
+   - Implement `PATCH /api/user-skills/:canonicalId` - Toggle enabled (internal API)
 
-2. **Create Contract Version Validator**
-   - Create `packages/shared/src/contract-validator.ts`
-   - Implement `validateAtRegistration()` (allows registration, warns)
-   - Implement `validateAtRuntime()` (THROWS on incompatible, no fallback)
-   - Add semver comparison logic
+2. **Register Routes**
+   - Add `/api/user-skills` to `apps/api/src/index.ts`
 
-3. **Define ExecutionContext**
-   - Create `packages/shared/src/execution-context.ts`
-   - Add `EXECUTION_CONTEXT_VERSION` constant
-   - Define immutable `ExecutionContext` interface (all fields `readonly`)
-   - Create `createExecutionContext()` factory with `Object.freeze()`
-   - Add `validateExecutionContext()` shape validator
+### Phase 10.2: Backend Runtime Integration
 
-4. **Update Shared Package Exports**
-   - Export contract, validator, context from `packages/shared/src/index.ts`
+3. **Add User-Scoped Skill Filtering (CRITICAL - Responsibility Boundary)**
+   - Add `getEnabledSkillsForUser(userId, traceId)` to `dynamic-registry.ts`
+   - Query `UserExternalSkill` where `enabled: true`
+   - Order results by `enabledAt ASC` (deterministic)
+   - Return empty array `[]` if no skills (never null)
+   - Add observability logging: `{ userId, traceId, enabledCanonicalIds }`
 
-### Phase 9.1 - Schema & Services
+4. **Wire to Agent Execution (NO direct DB queries)**
+   - `stream.ts` calls `registry.getEnabledSkillsForUser(userId, traceId)`
+   - Pass filtered skill list to `EnhancedSkillProcessor`
+   - If empty array, agent operates in LLM-only mode (explicit guardrail)
 
-5. **Update Prisma Schema**
-   - Add `UserExternalSkill` model
-   - Add `ExternalSkillExecution` model with tracing fields
-   - Add `contractVersion` to `ExternalSkill`
-   - Generate Prisma client
+### Phase 10.3: Frontend Chat Input
 
-6. **Export New Services**
-   - Update `apps/api/src/services/skills/index.ts`
+5. **Update ChatInput Layout**
+   - Center the input area (~40% width or max-w-2xl)
+   - Add "+" button on the left side of textarea
+   - Wire to DropdownMenu with "Skills" option
 
-### Phase 9.2 - Policy-Driven Runtimes
+6. **Add Switch Component**
+   - Run `npx shadcn-ui@latest add switch`
 
-7. **Create Policy Resolver**
-   - Implement `ExecutionPolicyResolver` with tier-based defaults
+### Phase 10.4: Frontend Skills Modal
 
-8. **Build Runtime Architecture**
-   - Create runtime interfaces using `ExecutionContext`
-   - Build runtime registry
-   - Refactor existing executors to new runtime pattern
+7. **Create SkillsConfigModal**
+   - Create `apps/web/src/components/skills/SkillsConfigModal.tsx`
+   - Header with title, subtitle, close button
+   - Search input + category filter
+   - Scrollable skills list with add/remove/toggle controls
+   - Footer with Cancel/Save buttons
+   - Local state for pending changes, single PUT on save
 
-### Phase 9.3 - LLM Integration
+8. **Add API Client Methods (GET + PUT only)**
+   - Add `userSkillsApi` to `apps/web/src/lib/api.ts`
+   - `list()` - GET /api/user-skills
+   - `update(skills)` - PUT /api/user-skills
 
-9. **Connect LLM to PromptRuntime**
-   - Integrate with existing `LLMClient`
-   - Add timeout enforcement
-   - Add retry logic with exponential backoff
-   - Add output validation
-
-### Phase 9.4 - Testing
-
-10. **Create Behavior Tests**
-    - Multi-skill chaining
-    - Failure fallback
-    - Schema violation
-
-11. **Create Platform Constraint Tests** (CRITICAL)
-    - Contract version enforcement tests
-    - ExecutionContext shape tests
-    - Runtime isolation tests
-
-### Phase 9.5 - Observability
-
-12. **Implement Tracing**
-    - Create trace context factory
-    - Build execution logger
-
-### Phase 9.6 - Migration
-
-13. **Run Database Migration**
-    - Execute migration
-    - Verify all tables created
+9. **Create React Query Hooks**
+   - Create `apps/web/src/hooks/useUserSkills.ts`
+   - `useUserSkills()` - fetch user's skills
+   - `useUpdateUserSkills()` - mutation to save changes
 
 ---
 
@@ -366,6 +443,69 @@ bun run sync:skills --unprotect=<id>  # Unprotect skill
 
 <details>
 <summary>Click to expand session history</summary>
+
+### Session 13 — 2026-02-04
+
+**Chat Input UI & Skills Configuration (Phase 10) - COMPLETE:**
+
+**Planning Phase:**
+- Analyzed existing codebase: ChatInput.tsx, external-skills routes, UserExternalSkill schema
+- Designed centered chat input layout with "+" menu
+- Planned Skills configuration modal with add/remove/toggle controls
+- Incorporated production-grade recommendations (runtime boundaries, conflict resolution, observability)
+- Created implementation plan with hard constraints and build rules
+
+**Implementation Phase:**
+
+**Backend (API):**
+- Created `apps/api/src/routes/user-skills.ts` with 5 endpoints (GET, PUT for UI; POST, DELETE, PATCH internal)
+- Registered `/api/user-skills` route in `apps/api/src/index.ts`
+- Added `getEnabledSkillsForUser(userId, traceId)` to `dynamic-registry.ts`
+  - Queries DB for enabled skills, orders by `enabledAt` (deterministic)
+  - Returns empty array for LLM-only mode (never null)
+  - Logs resolution events for observability
+- Wired `stream.ts` to call registry method (no direct DB queries)
+  - Added user skill filtering before execution
+  - Access control: blocks external skills not in user's set
+  - Guardrail: logs when no skills enabled
+
+**Frontend (Web):**
+- Updated `ChatInput.tsx`: centered layout (max-w-2xl), "+" button with dropdown
+- Added shadcn/ui Switch component via CLI
+- Created `SkillsConfigModal.tsx`:
+  - Search and category filter
+  - Scrollable skills list with add/remove/toggle controls
+  - Local state management for pending changes
+  - Single PUT on save (bulk update)
+- Added `userSkillsApi` to `apps/web/src/lib/api.ts` (list + update methods)
+- Created `apps/web/src/hooks/useUserSkills.ts` with React Query hooks
+- Wired modal into `ChatContainer.tsx`
+
+**Files Created (4):**
+- `apps/api/src/routes/user-skills.ts` (365 lines)
+- `apps/web/src/components/skills/SkillsConfigModal.tsx` (329 lines)
+- `apps/web/src/hooks/useUserSkills.ts` (26 lines)
+- `apps/web/src/components/ui/switch.tsx` (via shadcn CLI)
+
+**Files Modified (5):**
+- `apps/api/src/index.ts` (registered user-skills route)
+- `apps/api/src/services/skills/dynamic-registry.ts` (added getEnabledSkillsForUser method)
+- `apps/api/src/routes/stream.ts` (added user skill filtering logic)
+- `apps/web/src/components/chat/ChatInput.tsx` (centered layout, "+" menu)
+- `apps/web/src/components/chat/ChatContainer.tsx` (wired modal)
+- `apps/web/src/lib/api.ts` (added userSkillsApi)
+
+**Architecture Decisions Implemented:**
+- Runtime responsibility boundary: All filtering in DynamicSkillRegistry
+- Deterministic skill ordering by `enabledAt`
+- Empty skill set = LLM-only mode (explicit guardrail)
+- Observability: log userId, traceId, enabledCanonicalIds at resolution time
+- Frontend uses only GET + PUT (single bulk update)
+- Conflict resolution rules enforced (missing skills skipped silently)
+
+**Linter Status:** 0 errors
+
+**Status:** All success criteria met, Phase 10 complete
 
 ### Session 12 — 2026-02-04
 

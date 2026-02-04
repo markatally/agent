@@ -184,7 +184,7 @@ export class NodeExecutor {
         message: passed ? undefined : precondition.errorMessage,
       });
       
-      if (!passed && precondition.severity === 'fatal') {
+      if (!passed && (precondition.severity === 'fatal' || precondition.severity === 'error')) {
         return {
           success: false,
           error: {
@@ -209,7 +209,7 @@ export class NodeExecutor {
       return {
         success: false,
         error: {
-          code: 'EXECUTION_ERROR',
+          code: 'NODE_EXECUTION_ERROR',
           message: error instanceof Error ? error.message : String(error),
           nodeId: node.id,
           severity: 'fatal',
@@ -230,7 +230,7 @@ export class NodeExecutor {
         message: passed ? undefined : postcondition.errorMessage,
       });
       
-      if (!passed && postcondition.severity === 'fatal') {
+      if (!passed && (postcondition.severity === 'fatal' || postcondition.severity === 'error')) {
         return {
           success: false,
           error: {
@@ -862,9 +862,12 @@ export const FinalWriterNode: GraphNode<ResearchState, void, any> = {
     const papers = state.validPapers;
     const summaries = state.paperSummaries;
     
-    const claimsText = claims.map((c, i) => 
-      `${i + 1}. ${c.statement} [${c.supportingPaperIds.join(', ')}] (${c.confidence} confidence)`
-    ).join('\n');
+    const claimsText = claims
+      .map((c, i) => {
+        const statement = 'statement' in c ? c.statement : c.claim;
+        return `${i + 1}. ${statement} [${c.supportingPaperIds.join(', ')}] (${c.confidence} confidence)`;
+      })
+      .join('\n');
     
     const bibliographyText = papers.map(p => 
       `[${p.id}] ${p.authors?.join(', ')}. "${p.title}". ${p.source}. ${p.url}`

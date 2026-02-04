@@ -311,3 +311,225 @@ describe('Type Guards', () => {
     expect(isValidTableData({ schema: {} })).toBe(false);
   });
 });
+
+describe('Edge Cases - Validator Limits', () => {
+  it('should reject table exceeding maxColumns (20)', () => {
+    const columns = Array.from({ length: 21 }, (_, i) => ({
+      id: `col${i}`,
+      header: `Column ${i}`,
+    }));
+    
+    const table: TableData = {
+      schema: { columns },
+      rows: [Array(21).fill('value')],
+    };
+    
+    const result = validateTable(table);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('20 columns'))).toBe(true);
+  });
+  
+  it('should reject table exceeding maxRows (1000)', () => {
+    const rows = Array.from({ length: 1001 }, () => ['value']);
+    
+    const table: TableData = {
+      schema: {
+        columns: [{ id: 'col', header: 'Column' }],
+      },
+      rows,
+    };
+    
+    const result = validateTable(table);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('1000 rows'))).toBe(true);
+  });
+  
+  it('should reject cells exceeding maxCellLength (1000)', () => {
+    const longCell = 'a'.repeat(1001);
+    
+    const table: TableData = {
+      schema: {
+        columns: [{ id: 'col', header: 'Column' }],
+      },
+      rows: [[longCell]],
+    };
+    
+    const result = validateTable(table);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('1000 characters'))).toBe(true);
+  });
+  
+  it('should reject duplicate column IDs', () => {
+    const table: TableData = {
+      schema: {
+        columns: [
+          { id: 'col1', header: 'Column 1' },
+          { id: 'col1', header: 'Column 1 Duplicate' },
+        ],
+      },
+      rows: [['a', 'b']],
+    };
+    
+    const result = validateTable(table);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('duplicate'))).toBe(true);
+  });
+  
+  it('should reject invalid cell types (objects)', () => {
+    const table: TableData = {
+      schema: {
+        columns: [{ id: 'col', header: 'Column' }],
+      },
+      rows: [[{ invalid: 'object' } as any]],
+    };
+    
+    const result = validateTable(table);
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe('Edge Cases - Renderer Options', () => {
+  it('should respect includeCaption: false option', () => {
+    const table: TableData = {
+      schema: {
+        columns: [{ id: 'name', header: 'Name' }],
+      },
+      rows: [['Alice']],
+      caption: 'Should Not Appear',
+    };
+    
+    const result = renderTable(table, { includeCaption: false });
+    expect(result.success).toBe(true);
+    expect(result.output).not.toContain('Should Not Appear');
+  });
+  
+  it('should respect escapePipes: false option', () => {
+    const table: TableData = {
+      schema: {
+        columns: [{ id: 'expr', header: 'Expression' }],
+      },
+      rows: [['a | b']],
+    };
+    
+    const result = renderTable(table, { escapePipes: false });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('a | b');
+    expect(result.output).not.toContain('\\|');
+  });
+  
+  it('should render all alignment types correctly', () => {
+    const table: TableData = {
+      schema: {
+        columns: [
+          { id: 'left', header: 'Left', align: 'left' },
+          { id: 'center', header: 'Center', align: 'center' },
+          { id: 'right', header: 'Right', align: 'right' },
+        ],
+      },
+      rows: [['L', 'C', 'R']],
+    };
+    
+    const result = renderTable(table);
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('| :--- |'); // left
+    expect(result.output).toContain('| :---: |'); // center
+    expect(result.output).toContain('| ---: |'); // right
+  });
+});
+
+describe('Edge Cases - Builder', () => {
+  it('should handle tableFromObjects with inconsistent schemas', () => {
+    const data = [
+      { name: 'Alice', age: 30, city: 'NYC' },
+      { name: 'Bob', age: 25 }, // missing city
+      { name: 'Charlie' }, // missing age and city
+    ];
+    
+    const table = tableFromObjects(data);
+    const result = renderTable(table);
+    
+    expect(result.success).toBe(true);
+    // Should still render, with undefined for missing values
+  });
+  
+  it('should handle empty inputs gracefully', () => {
+    const emptyTable = tableFromObjects([]);
+    const result = validateTable(emptyTable);
+    
+    expect(result.valid).toBe(false); // No columns
+  });
+  
+  it('should handle validateAndRender retry logic', async () => {
+    let attempts = 0;
+    
+    const invalidThenValid = () => {
+      attempts++;
+      if (attempts === 1) {
+        return {
+          schema: { columns: [] }, // Invalid
+          rows: [],
+        };
+      }
+      return {
+        schema: {
+          columns: [{ id: 'col', header: 'Column' }],
+        },
+        rows: [['value']],
+      };
+    };
+    
+    const { validateAndRender } = await import('../../apps/api/src/services/table');
+    
+    const result = await validateAndRender(
+      invalidThenValid,
+      { maxRetries: 2 }
+    );
+    
+    expect(result.success).toBe(true);
+    expect(attempts).toBe(2);
+  });
+});
+
+describe('Edge Cases - Agent Utils', () => {
+  it('should handle multiple table blocks in one output', () => {
+    const input = `First table:
+
+\`\`\`json
+{
+  "type": "table",
+  "columns": [{ "id": "a", "header": "A" }],
+  "rows": [["1"]]
+}
+\`\`\`
+
+Second table:
+
+\`\`\`json
+{
+  "type": "table",
+  "columns": [{ "id": "b", "header": "B" }],
+  "rows": [["2"]]
+}
+\`\`\``;
+    
+    const output = processAgentOutput(input);
+    
+    // Should render both tables
+    expect(output).toContain('| A |');
+    expect(output).toContain('| B |');
+    expect(output).not.toContain('"type": "table"');
+  });
+  
+  it('should recover from invalid JSON in table blocks', () => {
+    const input = `\`\`\`json
+{
+  "type": "table",
+  "columns": [
+}
+\`\`\``;
+    
+    const output = processAgentOutput(input);
+    // Should preserve original since JSON is invalid
+    expect(output).toBe(input);
+  });
+});

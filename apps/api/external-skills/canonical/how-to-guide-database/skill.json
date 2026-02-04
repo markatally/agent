@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "how-to-guide-database",
+  "kind": "prompt",
+  "source": "github",
   "name": "How-To Guide Database",
   "description": "**Purpose**: Procedural documentation for common tasks.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/notion-knowledge-capture/reference/how-to-guide-database.md",
-    "syncedAt": "2026-02-04T10:44:53.217Z"
+    "syncedAt": "2026-02-04T15:34:41.428Z"
   },
   "isProtected": false
 }

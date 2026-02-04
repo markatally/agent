@@ -121,14 +121,23 @@ export const PaperSummarySchema = z.object({
  * A claim with REQUIRED citations
  * CRITICAL: supportingPaperIds MUST have at least one entry
  */
-export const ClaimSchema = z.object({
+const LegacyClaimSchema = z.object({
+  claim: z.string(),
+  supportingPaperIds: z.array(z.string()),
+  confidence: z.number().min(0).max(1),
+  category: z.string(),
+});
+
+const ModernClaimSchema = z.object({
   id: z.string(),
   statement: z.string(),
-  supportingPaperIds: z.array(z.string()).min(1),  // MANDATORY: at least one citation
+  supportingPaperIds: z.array(z.string()).min(1),
   confidence: z.enum(['high', 'medium', 'low']),
   category: z.string(),
   evidenceType: z.enum(['direct', 'inferred', 'synthesized']).default('direct'),
 });
+
+export const ClaimSchema = z.union([ModernClaimSchema, LegacyClaimSchema]);
 
 /**
  * Comparison matrix for papers
@@ -179,6 +188,7 @@ export const ResearchStateSchema = AgentStateSchema.extend({
   // Query
   searchQuery: z.string().optional(),
   searchSources: z.array(z.enum(['arxiv', 'semantic_scholar', 'pubmed', 'google_scholar'])).default(['arxiv', 'semantic_scholar']),
+  topic: z.string().optional(),
   
   // Discovery phase
   discoveredPapers: z.array(PaperSchema).default([]),
@@ -196,10 +206,13 @@ export const ResearchStateSchema = AgentStateSchema.extend({
   recallExhausted: z.boolean().default(false),
   
   // Summarization phase
-  paperSummaries: z.record(z.string(), PaperSummarySchema).default({}),
+  paperSummaries: z.union([
+    z.array(PaperSummarySchema),
+    z.record(z.string(), PaperSummarySchema),
+  ]).default([]),
   
   // Comparison phase
-  comparisonMatrix: ComparisonMatrixSchema.optional(),
+  comparisonMatrix: ComparisonMatrixSchema.nullable().optional(),
   
   // Synthesis phase
   synthesizedClaims: z.array(ClaimSchema).default([]),
@@ -255,7 +268,7 @@ export const PPTStateSchema = AgentStateSchema.extend({
   topic: z.string().optional(),
   context: z.string().optional(),
   targetAudience: z.string().optional(),
-  outline: OutlineSchema.optional(),
+  outline: OutlineSchema.nullable().optional(),
   slides: z.array(SlideSchema).default([]),
   outputPath: z.string().optional(),
   outputFileId: z.string().optional(),
@@ -280,10 +293,10 @@ export const ContentChunkSchema = z.object({
  * Key points extracted from content
  */
 export const KeyPointSchema = z.object({
-  id: z.string(),
+  id: z.string().optional(),
   point: z.string(),
-  importance: z.enum(['high', 'medium', 'low']),
-  sourceChunkId: z.string(),
+  importance: z.union([z.enum(['high', 'medium', 'low']), z.number().min(0).max(1)]),
+  sourceChunkId: z.string().optional(),
 });
 
 /**
@@ -291,11 +304,12 @@ export const KeyPointSchema = z.object({
  */
 export const SummaryStateSchema = AgentStateSchema.extend({
   sourceContent: z.string().optional(),
+  sourceText: z.string().optional(),
   sourceUrl: z.string().url().optional(),
   contentType: z.enum(['text', 'article', 'document', 'webpage']).optional(),
   chunks: z.array(ContentChunkSchema).default([]),
   keyPoints: z.array(KeyPointSchema).default([]),
-  summary: z.string().optional(),
+  summary: z.string().nullable().optional(),
   summaryLength: z.enum(['brief', 'standard', 'detailed']).default('standard'),
 });
 
@@ -327,6 +341,7 @@ export const ChatStateSchema = AgentStateSchema.extend({
     toolCalls: z.array(ToolCallRecordSchema).optional(),
   })).default([]),
   toolsUsed: z.array(ToolCallRecordSchema).default([]),
+  toolCalls: z.array(ToolCallRecordSchema).optional(),
   responseContent: z.string().optional(),
 });
 
@@ -351,7 +366,7 @@ export const SkillMetadataSchema = z.object({
   name: z.string(),
   version: z.string(),
   description: z.string(),
-  category: z.enum(['research', 'ppt', 'summary', 'utility', 'tool']),
+  category: z.string(),
   requiredTools: z.array(z.string()).default([]),
   estimatedDurationMs: z.number().default(5000),
   retryPolicy: RetryPolicySchema.default({}),
@@ -375,8 +390,10 @@ export const ValidationResultSchema = z.object({
  */
 export const ConditionResultSchema = z.object({
   passed: z.boolean(),
-  conditionName: z.string(),
+  conditionName: z.string().optional(),
   message: z.string().optional(),
+  reason: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 // ============================================================

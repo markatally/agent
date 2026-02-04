@@ -8,6 +8,7 @@ import { getSkill, listSkills, type Skill } from '../../../../../skills';
 import { getExternalSkillLoader } from '../external-skills/loader';
 import { getExternalSkillAdapter } from './external-bridge';
 import type { UnifiedSkill } from '../external-skills/types';
+import { prisma } from '../prisma';
 
 export interface EnhancedSkill extends Skill {
   isExternal: boolean;
@@ -126,6 +127,134 @@ export class DynamicSkillRegistry {
    */
   getEnabledExternal(): string[] {
     return Array.from(this.enabledExternalSkills);
+  }
+
+  /**
+   * Get enabled skills for a specific user.
+   * Returns skills ordered by enabledAt (deterministic ordering).
+   * Returns empty array if user has no skills (not null).
+   * 
+   * CRITICAL: This is the ONLY method that should query user skill preferences from DB.
+   * Route handlers MUST use this method, not query DB directly.
+   * 
+   * @param userId - User ID to fetch skills for
+   * @param traceId - Optional trace ID for observability
+   * @returns Array of enabled skills (empty if none)
+   */
+  async getEnabledSkillsForUser(
+    userId: string,
+    traceId?: string
+  ): Promise<EnhancedSkill[]> {
+    try {
+      // Query user's enabled skills from database
+      const userSkills = await prisma.userExternalSkill.findMany({
+        where: {
+          userId,
+          enabled: true,
+        },
+        include: {
+          skill: true,
+        },
+        orderBy: {
+          enabledAt: 'asc', // Deterministic ordering
+        },
+      });
+
+      // If no skills, return empty array (never null)
+      if (userSkills.length === 0) {
+        console.info({
+          event: 'user_skills_resolved',
+          userId,
+          traceId,
+          enabledCanonicalIds: [],
+          count: 0,
+        });
+        return [];
+      }
+
+      // Load external skill metadata and convert to EnhancedSkill
+      const loader = getExternalSkillLoader();
+      const adapter = getExternalSkillAdapter();
+      const enabledSkills: EnhancedSkill[] = [];
+
+      for (const userSkill of userSkills) {
+        const externalSkill = await loader.getSkill(userSkill.canonicalId);
+        
+        // Skip if skill no longer exists in registry (conflict resolution rule)
+        if (!externalSkill) {
+          console.warn({
+            event: 'user_skill_not_found',
+            userId,
+            canonicalId: userSkill.canonicalId,
+            message: 'Skill in user set no longer exists in registry',
+          });
+          continue;
+        }
+
+        // Validate contract version
+        const validation = ContractVersionValidator.validateAtRegistration(externalSkill);
+        if (!validation.valid) {
+          console.warn({
+            event: 'user_skill_invalid_contract',
+            userId,
+            canonicalId: userSkill.canonicalId,
+            validation,
+          });
+          continue;
+        }
+
+        // Check if skill can be executed
+        if (!adapter.canExecute(externalSkill)) {
+          console.warn({
+            event: 'user_skill_cannot_execute',
+            userId,
+            canonicalId: userSkill.canonicalId,
+          });
+          continue;
+        }
+
+        // Convert to product skill format
+        const productSkill = adapter.toProductSkill(externalSkill);
+
+        const enhancedSkill: EnhancedSkill = {
+          ...productSkill,
+          isExternal: true,
+          externalMetadata: {
+            canonicalId: externalSkill.canonicalId,
+            version: externalSkill.version,
+            contractVersion: externalSkill.contractVersion,
+            capabilityLevel: externalSkill.capabilityLevel,
+            invocationPattern: externalSkill.kind,
+            source: {
+              repoUrl: externalSkill.sourceInfo.repoUrl || '',
+              repoPath: externalSkill.sourceInfo.repoPath || '',
+            },
+          },
+        };
+
+        enabledSkills.push(enhancedSkill);
+      }
+
+      // Observability logging
+      console.info({
+        event: 'user_skills_resolved',
+        userId,
+        traceId,
+        enabledCanonicalIds: enabledSkills.map((s) => s.externalMetadata!.canonicalId),
+        count: enabledSkills.length,
+      });
+
+      return enabledSkills;
+    } catch (error) {
+      console.error({
+        event: 'user_skills_resolution_error',
+        userId,
+        traceId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      // Return empty array on error (fail-safe to LLM-only mode)
+      return [];
+    }
   }
 
   /**

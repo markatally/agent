@@ -9,6 +9,63 @@ import type { ToolContext } from '../../apps/api/src/services/tools/types';
 describe('WebSearchTool', () => {
   const mockWorkspaceDir = '/tmp/test-websearch-workspace';
   let mockContext: ToolContext;
+  const mockOrchestrator = async (
+    input:
+      | {
+          query: string;
+          skillIds: string[];
+          limit: number;
+          sortBy?: 'relevance' | 'date' | 'citations';
+          dateRange?: string;
+          absoluteDateWindow?: {
+            startDate: string;
+            endDate: string;
+            strict: boolean;
+          };
+        }
+      | {
+          query: string;
+          options: {
+            limit: number;
+            sortBy?: 'relevance' | 'date' | 'citations';
+            dateRange?: string;
+            absoluteDateWindow?: {
+              startDate: string;
+              endDate: string;
+              strict: boolean;
+            };
+          };
+        }
+  ) => {
+    const limit = 'limit' in input ? input.limit : input.options.limit;
+    const skillIds = 'skillIds' in input ? input.skillIds : ['arxiv', 'semantic_scholar'];
+    const sourcesQueried = skillIds.length > 0 ? skillIds : ['arxiv'];
+    const papers = Array.from({ length: limit }, (_, index) => {
+      const source = sourcesQueried[index % sourcesQueried.length] ?? 'arxiv';
+      return {
+        title: `Paper ${index + 1}`,
+        authors: ['Test Author'],
+        abstract: 'Mock abstract',
+        link: `https://example.com/paper/${index + 1}`,
+        source,
+        doi: null,
+        arxivId: source === 'arxiv' ? `arxiv-${index + 1}` : null,
+        semanticScholarId: source === 'semantic_scholar' ? `s2-${index + 1}` : null,
+        publicationDate: '2024-01-01',
+        publicationDateSource: source === 'arxiv' ? 'arxiv_v1' : 'semantic_scholar',
+        publicationDateConfidence: 'high',
+        venue: 'Test Venue',
+        citationCount: 42,
+      };
+    });
+
+    return {
+      papers,
+      sourcesQueried,
+      sourcesSkipped: [],
+      exclusionReasons: [],
+    };
+  };
 
   beforeEach(async () => {
     // Create temporary workspace
@@ -20,7 +77,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should validate query is required', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({});
 
@@ -29,7 +86,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should reject empty query', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: '   ' });
 
@@ -38,7 +95,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should accept valid query with default parameters', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: 'machine learning' });
 
@@ -53,7 +110,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should use custom sources parameter', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: 'neural networks', sources: 'arxiv' });
 
@@ -62,7 +119,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should use custom topK parameter', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: 'deep learning', topK: 3 });
 
@@ -71,7 +128,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should use custom sortBy parameter', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: 'transformers', sortBy: 'date' });
 
@@ -80,7 +137,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should handle multiple sources', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({
       query: 'reinforcement learning',
@@ -94,7 +151,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should limit topK to maximum 20', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: 'attention mechanisms', topK: 50 });
 
@@ -104,7 +161,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should return artifacts with JSON data when results found', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: 'graph neural networks' });
 
@@ -117,7 +174,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should include metadata in output', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: 'natural language processing' });
 
@@ -130,7 +187,7 @@ describe('WebSearchTool', () => {
   });
 
   it('should gracefully handle API errors or empty results', async () => {
-    const tool = new WebSearchTool(mockContext);
+    const tool = new WebSearchTool(mockContext, { runOrchestrator: mockOrchestrator });
 
     const result = await tool.execute({ query: 'test query' });
 

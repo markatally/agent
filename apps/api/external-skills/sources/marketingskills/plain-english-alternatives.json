@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "plain-english-alternatives",
+  "kind": "prompt",
+  "source": "github",
   "name": "Plain English Alternatives",
   "description": "Replace complex or pompous words with plain English alternatives.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/copy-editing/references/plain-english-alternatives.md",
-    "syncedAt": "2026-02-04T10:44:54.338Z"
+    "syncedAt": "2026-02-04T15:34:42.936Z"
   },
   "isProtected": false
 }

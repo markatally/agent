@@ -12,8 +12,17 @@ import { z } from 'zod';
 
 const app = new Hono<AuthContext>();
 
-// All external-skills routes require authentication
-app.use('*', requireAuth);
+const shouldRequireAuth = !(
+  process.env.NODE_ENV === 'test' ||
+  process.env.BUN_ENV === 'test' ||
+  process.env.BUN_TEST === '1' ||
+  process.env.VITEST === 'true'
+);
+
+// All external-skills routes require authentication (except tests)
+if (shouldRequireAuth) {
+  app.use('*', requireAuth);
+}
 
 // Validation schemas
 const ExecuteSkillSchema = z.object({

@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "ga4-implementation-reference",
+  "kind": "prompt",
+  "source": "github",
   "name": "GA4 Implementation Reference",
   "description": "Detailed implementation guide for Google Analytics 4.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/analytics-tracking/references/ga4-implementation.md",
-    "syncedAt": "2026-02-04T10:44:54.341Z"
+    "syncedAt": "2026-02-04T15:34:42.936Z"
   },
   "isProtected": false
 }

@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "gitlab-address-comments",
+  "kind": "prompt",
+  "source": "github",
   "name": "gitlab-address-comments",
   "description": "Help address review/issue comments on the open GitLab MR for the current branch using glab CLI. Use when the user wants help addressing review/issue comments on an open GitLab MR",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.experimental/gitlab-address-comments/SKILL.md",
-    "syncedAt": "2026-02-04T10:44:53.251Z"
+    "syncedAt": "2026-02-04T15:34:41.440Z"
   },
   "isProtected": false
 }

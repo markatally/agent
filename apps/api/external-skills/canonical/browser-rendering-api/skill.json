@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "browser-rendering-api",
+  "kind": "prompt",
+  "source": "github",
   "name": "Browser Rendering API",
   "description": "**Base:** `https://api.cloudflare.com/client/v4/accounts/{accountId}/browser-rendering`",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/browser-rendering/api.md",
-    "syncedAt": "2026-02-04T10:44:53.234Z"
+    "syncedAt": "2026-02-04T15:34:41.435Z"
   },
   "isProtected": false
 }

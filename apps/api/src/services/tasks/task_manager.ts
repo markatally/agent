@@ -215,6 +215,17 @@ export class TaskManager {
     sessionId: string,
     toolName: string,
     parameters: Record<string, any>
+  ): boolean {
+    return this.getToolCallDecision(sessionId, toolName, parameters).allowed;
+  }
+
+  /**
+   * Check if a tool call should be allowed and include reason
+   */
+  getToolCallDecision(
+    sessionId: string,
+    toolName: string,
+    parameters: Record<string, any>
   ): { allowed: boolean; reason?: string } {
     const state = this.state.get(sessionId);
     const history = this.toolCallHistory.get(sessionId) || [];
@@ -315,7 +326,7 @@ export class TaskManager {
     });
 
     // Determine completion status
-    if (allStepsCompleted && allArtifactsGenerated) {
+    if (allStepsCompleted) {
       state.phase = 'completed';
       return {
         isComplete: true,
@@ -424,14 +435,16 @@ export class TaskManager {
     const state = this.state.get(sessionId);
 
     if (!state) {
-      return 'No active task.';
+      return '';
     }
 
     const completedSteps = state.plan.filter((s) => s.status === 'completed').length;
     const totalSteps = state.plan.length;
     const progress = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
 
-    let summary = `**Task Progress:** ${progress}% (${completedSteps}/${totalSteps} steps completed)\n\n`;
+    let summary = `Task: ${state.goal.description}\n`;
+    summary += `Phase: ${state.phase}\n`;
+    summary += `Progress: ${progress}% (${completedSteps}/${totalSteps} steps completed)\n\n`;
 
     // Add current step
     const currentStep = state.plan[state.currentStep];
@@ -461,28 +474,30 @@ export class TaskManager {
       return '';
     }
 
-    let context = `TASK CONTEXT:\n`;
-    context += `- Goal: ${state.goal.description}\n`;
-    context += `- Phase: ${state.phase}\n`;
-    context += `- Progress: `;
+    let context = `Task Goal: ${state.goal.description}\n`;
+    context += `Phase: ${state.phase}\n`;
+    context += `Execution Plan:\n`;
 
     const completedSteps = state.plan.filter((s) => s.status === 'completed').length;
     context += `${completedSteps}/${state.plan.length} steps completed\n`;
+    for (const step of state.plan) {
+      context += `- ${step.description} [${step.status}]\n`;
+    }
 
     if (state.artifactGenerated) {
-      context += `- Artifact Generated: ${state.artifactGenerated.name}\n`;
+      context += `Artifact Generated: ${state.artifactGenerated.name}\n`;
     }
 
     if (state.searchResults.length > 0) {
-      context += `- Search Results: ${state.searchResults.length} papers found\n`;
+      context += `Search Results: ${state.searchResults.length} papers found\n`;
     }
 
-    context += `\nINSTRUCTIONS:\n`;
+    context += `\nInstructions:\n`;
     context += `- Complete the task efficiently without redundant tool calls\n`;
     context += `- When PPT is generated, the task is COMPLETE - report completion to user\n`;
     context += `- When user asks about progress, report current state WITHOUT making new tool calls\n`;
     context += `- web_search is a high-cost tool: call it AT MOST ONCE per task\n`;
-    context += `- After searching, immediately proceed to PPT generation using existing results\n`;
+    context += `- After searching, proceed using existing results\n`;
     context += `- If search results are insufficient, ask user for clarification instead of re-searching\n`;
 
     return context;

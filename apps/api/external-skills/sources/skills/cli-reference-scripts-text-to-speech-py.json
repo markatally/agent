@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "cli-reference-scripts-text-to-speech-py",
+  "kind": "prompt",
+  "source": "github",
   "name": "CLI reference (`scripts/text_to_speech.py`)",
   "description": "This file contains the \"command catalog\" for the bundled speech generation CLI. Keep `SKILL.md` as overview-first; put verbose CLI details here.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/speech/references/cli.md",
-    "syncedAt": "2026-02-04T10:44:53.214Z"
+    "syncedAt": "2026-02-04T15:34:41.428Z"
   },
   "isProtected": false
 }

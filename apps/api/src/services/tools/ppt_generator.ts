@@ -238,22 +238,24 @@ export class PptGeneratorTool implements Tool {
       const sizeBytes = stats.size;
       const sizeKB = (sizeBytes / 1024).toFixed(2);
 
-      // Save to database for download
+      // Save to database for download when context is available
       let fileId: string | undefined;
-      try {
-        const dbFile = await prisma.file.create({
-          data: {
-            sessionId: this.context.sessionId,
-            filename: safeFilename,
-            filepath: `outputs/ppt/${safeFilename}`,
-            sizeBytes: BigInt(sizeBytes),
-            mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-          },
-        });
-        fileId = dbFile.id;
-      } catch (error) {
-        console.warn('Failed to save file to database:', error);
-        // Continue without database entry - file still exists on disk
+      if (this.context?.sessionId) {
+        try {
+          const dbFile = await prisma.file.create({
+            data: {
+              sessionId: this.context.sessionId,
+              filename: safeFilename,
+              filepath: `outputs/ppt/${safeFilename}`,
+              sizeBytes: BigInt(sizeBytes),
+              mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            },
+          });
+          fileId = dbFile.id;
+        } catch (error) {
+          console.warn('Failed to save file to database:', error);
+          // Continue without database entry - file still exists on disk
+        }
       }
 
       const output = `Successfully generated PowerPoint presentation:

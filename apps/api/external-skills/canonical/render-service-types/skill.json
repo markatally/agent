@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "render-service-types",
+  "kind": "prompt",
+  "source": "github",
   "name": "Render Service Types",
   "description": "Detailed explanation of each service type available on Render. Choose the right service type based on your application's needs.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/render-deploy/references/service-types.md",
-    "syncedAt": "2026-02-04T10:44:53.245Z"
+    "syncedAt": "2026-02-04T15:34:41.439Z"
   },
   "isProtected": false
 }

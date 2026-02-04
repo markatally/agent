@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "tunnel-api",
+  "kind": "prompt",
+  "source": "github",
   "name": "Tunnel API",
   "description": "**Base URL**: `https://api.cloudflare.com/client/v4`",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/tunnel/api.md",
-    "syncedAt": "2026-02-04T10:44:53.234Z"
+    "syncedAt": "2026-02-04T15:34:41.434Z"
   },
   "isProtected": false
 }

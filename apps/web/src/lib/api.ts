@@ -518,6 +518,79 @@ export const skillsApi = {
   },
 };
 
+// External Skills API
+export interface ExternalSkill {
+  canonicalId: string;
+  name: string;
+  description: string;
+  category: string | null;
+  version: string;
+  contractVersion?: string;
+  invocationPattern?: string;
+  capabilityLevel?: string;
+  executionScope?: string;
+  isProtected?: boolean;
+  source: {
+    repoUrl?: string;
+    repoPath?: string;
+  };
+  enabled?: boolean;
+}
+
+export const externalSkillsApi = {
+  /**
+   * List all available external skills
+   */
+  async list(): Promise<{ skills: ExternalSkill[]; total: number }> {
+    return apiFetch<{ skills: ExternalSkill[]; total: number }>('/external-skills');
+  },
+
+  /**
+   * Get details for a specific external skill
+   */
+  async get(canonicalId: string): Promise<ExternalSkill> {
+    return apiFetch<ExternalSkill>(`/external-skills/${canonicalId}`);
+  },
+};
+
+// User Skills API
+export interface UserSkill {
+  canonicalId: string;
+  name: string;
+  description: string;
+  category: string | null;
+  enabled: boolean;
+  addedAt: string;
+  updatedAt: string;
+}
+
+export const userSkillsApi = {
+  /**
+   * Get user's current skill preferences
+   */
+  async list(): Promise<{ skills: UserSkill[]; total: number }> {
+    return apiFetch<{ skills: UserSkill[]; total: number }>('/user-skills');
+  },
+
+  /**
+   * Bulk update user's skill preferences (add/remove/toggle in one call)
+   * Used by: SkillsConfigModal (single save operation)
+   */
+  async update(skills: { canonicalId: string; enabled: boolean }[]): Promise<{
+    success: boolean;
+    skills: UserSkill[];
+    total: number;
+  }> {
+    return apiFetch<{ success: boolean; skills: UserSkill[]; total: number }>(
+      '/user-skills',
+      {
+        method: 'PUT',
+        body: JSON.stringify({ skills }),
+      }
+    );
+  },
+};
+
 // Export unified API client
 export const apiClient = {
   auth: authApi,
@@ -526,4 +599,6 @@ export const apiClient = {
   chat: chatApi,
   files: filesApi,
   skills: skillsApi,
+  externalSkills: externalSkillsApi,
+  userSkills: userSkillsApi,
 };

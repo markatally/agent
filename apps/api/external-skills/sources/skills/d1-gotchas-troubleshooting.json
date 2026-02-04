@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "d1-gotchas-troubleshooting",
+  "kind": "prompt",
+  "source": "github",
   "name": "D1 Gotchas & Troubleshooting",
   "description": "**Cause:** Using string interpolation instead of prepared statements with bind()",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/d1/gotchas.md",
-    "syncedAt": "2026-02-04T10:44:53.223Z"
+    "syncedAt": "2026-02-04T15:34:41.431Z"
   },
   "isProtected": false
 }

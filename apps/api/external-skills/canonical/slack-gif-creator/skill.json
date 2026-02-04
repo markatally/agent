@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "slack-gif-creator",
+  "kind": "prompt",
+  "source": "github",
   "name": "slack-gif-creator",
   "description": "Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like \"make me a GIF of X doing Y for Slack.\"",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/anthropics/skills.git",
     "repoPath": "skills/slack-gif-creator/SKILL.md",
-    "syncedAt": "2026-02-04T10:44:51.211Z"
+    "syncedAt": "2026-02-04T15:34:38.445Z"
   },
   "isProtected": false
 }

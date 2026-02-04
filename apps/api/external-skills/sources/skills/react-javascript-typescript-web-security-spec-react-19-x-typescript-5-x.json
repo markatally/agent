@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "react-javascript-typescript-web-security-spec-react-19-x-typescript-5-x",
+  "kind": "prompt",
+  "source": "github",
   "name": "React (JavaScript/TypeScript) Web Security Spec (React 19.x, TypeScript 5.x)",
   "description": "This document is designed as a **security spec** that supports:",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/security-best-practices/references/javascript-typescript-react-web-frontend-security.md",
-    "syncedAt": "2026-02-04T10:44:53.210Z"
+    "syncedAt": "2026-02-04T15:34:41.427Z"
   },
   "isProtected": false
 }

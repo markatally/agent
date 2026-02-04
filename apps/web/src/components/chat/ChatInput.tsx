@@ -1,7 +1,13 @@
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react';
-import { Send, GripHorizontal } from 'lucide-react';
+import { Send, GripHorizontal, Plus, Sparkles } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
 import { cn } from '../../lib/utils';
 
 const MIN_INPUT_HEIGHT = 80;
@@ -13,9 +19,10 @@ interface ChatInputProps {
   onSend: (content: string) => void;
   disabled?: boolean;      // Completely disables input (invalid session, sending)
   sendDisabled?: boolean;  // Only disables send button (streaming)
+  onSkillsClick?: () => void; // Handler for Skills menu item
 }
 
-export function ChatInput({ onSend, disabled, sendDisabled }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, sendDisabled, onSkillsClick }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [isComposing, setIsComposing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -140,31 +147,57 @@ export function ChatInput({ onSend, disabled, sendDisabled }: ChatInputProps) {
         </div>
       </div>
 
-      <div className="flex flex-col h-full p-4 pt-3">
-        <div className="flex gap-2 items-end flex-1">
-          <Textarea
-            ref={textareaRef}
-            value={message}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            onCompositionStart={handleCompositionStart}
-            onCompositionEnd={handleCompositionEnd}
-            placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
-            disabled={disabled}
-            className="flex-1 h-full resize-none"
-          />
-          <Button
-            onClick={handleSend}
-            disabled={!canSend}
-            size="icon"
-            className="shrink-0"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
+      {/* Centered container with max width */}
+      <div className="flex flex-col h-full">
+        <div className="max-w-2xl mx-auto w-full px-4 flex flex-col h-full pt-3">
+          <div className="flex gap-2 items-end flex-1">
+            {/* Plus button with dropdown menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  disabled={disabled}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem
+                  onClick={() => onSkillsClick?.()}
+                  disabled={disabled}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Skills
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <Textarea
+              ref={textareaRef}
+              value={message}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
+              disabled={disabled}
+              className="flex-1 h-full resize-none"
+            />
+            <Button
+              onClick={handleSend}
+              disabled={!canSend}
+              size="icon"
+              className="shrink-0"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2 flex-shrink-0">
+            Press Enter to send, Shift+Enter for new line
+          </p>
         </div>
-        <p className="text-xs text-muted-foreground mt-2 flex-shrink-0">
-          Press Enter to send, Shift+Enter for new line
-        </p>
       </div>
     </div>
   );

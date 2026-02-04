@@ -16,16 +16,24 @@
  * parsed from user input BEFORE any tool calls
  */
 export interface TimeRangeIntent {
-  /** Numeric value (e.g., 1 for "last 1 month") */
-  value: number;
   /** Time unit */
-  unit: 'days' | 'weeks' | 'months' | 'years';
+  unit: 'days' | 'weeks' | 'months' | 'years' | 'absolute';
+  /** Numeric value (e.g., 1 for "last 1 month") */
+  value?: number;
   /** 
    * If true, this is an EXPLICIT user constraint that MUST NOT be expanded.
    * Patterns like "last 1 month", "past 30 days", "recent 2 weeks" are strict.
    * Generic patterns like "recent papers" are non-strict.
    */
   strict: boolean;
+  /** Absolute range: start year (YYYY) */
+  startYear?: number;
+  /** Absolute range: start month (0-11) */
+  startMonth?: number;
+  /** Absolute range: end year (YYYY) */
+  endYear?: number;
+  /** Absolute range: end month (0-11) */
+  endMonth?: number;
   /** Original user expression for debugging/logging */
   originalExpression?: string;
 }
@@ -49,8 +57,8 @@ export interface AbsoluteDateWindow {
  * Result of time range validation
  */
 export interface TimeRangeValidationResult {
-  valid: boolean;
-  dateWindow?: AbsoluteDateWindow;
+  isValid: boolean;
+  absoluteDateWindow?: AbsoluteDateWindow;
   error?: string;
 }
 
@@ -117,10 +125,7 @@ const STRICT_TIME_PATTERNS: Array<{
       };
       const monthNum = monthNames[m[1].toLowerCase()];
       const year = parseInt(m[2], 10);
-      const startDate = new Date(year, monthNum, 1);
-      const now = new Date();
-      const diffDays = Math.ceil((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-      return { value: diffDays, unit: 'days', strict: true };
+      return { unit: 'absolute', strict: true, startYear: year, startMonth: monthNum };
     },
   },
 ];
@@ -203,17 +208,29 @@ export function intentToAbsoluteDateWindow(
 
   switch (intent.unit) {
     case 'days':
-      startDate.setDate(startDate.getDate() - intent.value);
+      startDate.setDate(startDate.getDate() - (intent.value ?? 0));
       break;
     case 'weeks':
-      startDate.setDate(startDate.getDate() - intent.value * 7);
+      startDate.setDate(startDate.getDate() - (intent.value ?? 0) * 7);
       break;
     case 'months':
-      startDate.setMonth(startDate.getMonth() - intent.value);
+      startDate.setMonth(startDate.getMonth() - (intent.value ?? 0));
       break;
     case 'years':
-      startDate.setFullYear(startDate.getFullYear() - intent.value);
+      startDate.setFullYear(startDate.getFullYear() - (intent.value ?? 0));
       break;
+    case 'absolute': {
+      const startYear = intent.startYear ?? referenceDate.getFullYear();
+      const startMonth = intent.startMonth ?? 0;
+      startDate.setFullYear(startYear, startMonth, 1);
+
+      if (intent.endYear != null) {
+        const endMonth = intent.endMonth ?? 11;
+        const lastDay = new Date(intent.endYear, endMonth + 1, 0).getDate();
+        endDate.setFullYear(intent.endYear, endMonth, lastDay);
+      }
+      break;
+    }
   }
 
   return {
@@ -225,10 +242,10 @@ export function intentToAbsoluteDateWindow(
 }
 
 /**
- * Parse dateRange string (from tool params) to AbsoluteDateWindow
+ * Parse dateRange string (from tool params) to TimeRangeIntent
  * Handles legacy formats like "last-12-months", "2020-2024"
  */
-export function parseDateRangeString(dateRange: string): AbsoluteDateWindow | null {
+export function parseDateRangeString(dateRange: string): TimeRangeIntent | null {
   const lower = dateRange.toLowerCase().trim();
 
   // Pattern: last-N-months, last-N-years, last-N-days, last-N-weeks
@@ -242,27 +259,33 @@ export function parseDateRangeString(dateRange: string): AbsoluteDateWindow | nu
     
     // IMPORTANT: dateRange strings from tool params are treated as STRICT
     // because they represent an explicit filter the user/system requested
-    const intent: TimeRangeIntent = { value, unit, strict: true, originalExpression: dateRange };
-    return intentToAbsoluteDateWindow(intent);
+    return { value, unit, strict: true, originalExpression: dateRange };
   }
 
   // Pattern: YYYY-YYYY (year range)
   const yearRangeMatch = lower.match(/^(\d{4})-(\d{4})$/);
   if (yearRangeMatch) {
     return {
-      startDate: `${yearRangeMatch[1]}-01-01`,
-      endDate: `${yearRangeMatch[2]}-12-31`,
-      strict: true, // Explicit year ranges are strict
+      unit: 'absolute',
+      strict: true,
+      startYear: parseInt(yearRangeMatch[1], 10),
+      endYear: parseInt(yearRangeMatch[2], 10),
+      startMonth: 0,
+      endMonth: 11,
     };
   }
 
   // Pattern: single year YYYY
   const singleYearMatch = lower.match(/^(\d{4})$/);
   if (singleYearMatch) {
+    const year = parseInt(singleYearMatch[1], 10);
     return {
-      startDate: `${singleYearMatch[1]}-01-01`,
-      endDate: `${singleYearMatch[1]}-12-31`,
+      unit: 'absolute',
       strict: true,
+      startYear: year,
+      endYear: year,
+      startMonth: 0,
+      endMonth: 11,
     };
   }
 
@@ -298,6 +321,13 @@ export function isDateWithinWindow(dateStr: string | null | undefined, window: A
   }
 
   try {
+    if (/^\d{4}$/.test(dateStr)) {
+      const year = parseInt(dateStr, 10);
+      if (window.strict) return false;
+      const startYear = new Date(window.startDate).getFullYear();
+      const endYear = new Date(window.endDate).getFullYear();
+      return year >= startYear && year <= endYear;
+    }
     const date = new Date(dateStr);
     const start = new Date(window.startDate);
     const end = new Date(window.endDate);
@@ -361,28 +391,26 @@ export function isDateWithinWindow(dateStr: string | null | undefined, window: A
 export function filterPapersByDateWindow<T extends { publicationDate?: string | null }>(
   papers: T[],
   window: AbsoluteDateWindow
-): { filtered: T[]; excluded: T[]; reasons: string[] } {
-  const filtered: T[] = [];
-  const excluded: T[] = [];
-  const reasons: string[] = [];
+): Array<T & { included: boolean; exclusionReason?: string }> {
+  const results: Array<T & { included: boolean; exclusionReason?: string }> = [];
 
   for (const paper of papers) {
     if (isDateWithinWindow(paper.publicationDate, window)) {
-      filtered.push(paper);
+      results.push({ ...paper, included: true });
     } else {
-      excluded.push(paper);
       const reason = paper.publicationDate
-        ? `Paper date ${paper.publicationDate} outside window [${window.startDate}, ${window.endDate}]`
-        : `Paper has no publication date (strict mode excludes undated papers)`;
-      reasons.push(reason);
+        ? `Paper date ${paper.publicationDate} outside date range [${window.startDate}, ${window.endDate}]`
+        : `Paper missing publication date (strict mode excludes undated papers)`;
+      results.push({ ...paper, included: false, exclusionReason: reason });
     }
   }
 
-  if (excluded.length > 0) {
-    console.log(`[TimeRangeValidator] Post-search filter: ${excluded.length}/${papers.length} papers excluded for date constraints`);
+  const excludedCount = results.filter((p) => !p.included).length;
+  if (excludedCount > 0) {
+    console.log(`[TimeRangeValidator] Post-search filter: ${excludedCount}/${papers.length} papers excluded for date constraints`);
   }
 
-  return { filtered, excluded, reasons };
+  return results;
 }
 
 /**
@@ -397,9 +425,10 @@ export function validateTimeRange(
 ): TimeRangeValidationResult {
   // Priority 1: Parse from dateRange parameter (explicit tool param)
   if (dateRangeParam) {
-    const window = parseDateRangeString(dateRangeParam);
-    if (window) {
-      return { valid: true, dateWindow: window };
+    const intent = parseDateRangeString(dateRangeParam);
+    if (intent) {
+      const window = intentToAbsoluteDateWindow(intent);
+      return { isValid: true, absoluteDateWindow: window };
     }
   }
 
@@ -408,12 +437,12 @@ export function validateTimeRange(
     const intent = parseTimeRangeFromInput(userInput);
     if (intent) {
       const window = intentToAbsoluteDateWindow(intent);
-      return { valid: true, dateWindow: window };
+      return { isValid: true, absoluteDateWindow: window };
     }
   }
 
   // No time range specified - valid but no window
-  return { valid: true };
+  return { isValid: true };
 }
 
 /**

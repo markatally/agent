@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "output-patterns",
+  "kind": "prompt",
+  "source": "github",
   "name": "Output Patterns",
   "description": "Use these patterns when skills need to produce consistent, high-quality output.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/anthropics/skills.git",
     "repoPath": "skills/skill-creator/references/output-patterns.md",
-    "syncedAt": "2026-02-04T10:44:51.209Z"
+    "syncedAt": "2026-02-04T15:34:38.445Z"
   },
   "isProtected": false
 }

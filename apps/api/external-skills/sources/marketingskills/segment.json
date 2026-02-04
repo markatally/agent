@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "segment",
+  "kind": "prompt",
+  "source": "github",
   "name": "Segment",
   "description": "Customer data platform for collecting, routing, and activating user data.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "tools/integrations/segment.md",
-    "syncedAt": "2026-02-04T10:44:54.332Z"
+    "syncedAt": "2026-02-04T15:34:42.934Z"
   },
   "isProtected": false
 }

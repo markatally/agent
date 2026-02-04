@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "create-plan",
+  "kind": "prompt",
+  "source": "github",
   "name": "create-plan",
   "description": "Create a concise plan. Use when a user explicitly asks for a plan related to a coding task.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.experimental/create-plan/SKILL.md",
-    "syncedAt": "2026-02-04T10:44:53.251Z"
+    "syncedAt": "2026-02-04T15:34:41.440Z"
   },
   "isProtected": false
 }

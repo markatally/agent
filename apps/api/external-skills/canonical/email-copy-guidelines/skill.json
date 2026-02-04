@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "email-copy-guidelines",
+  "kind": "prompt",
+  "source": "github",
   "name": "Email Copy Guidelines",
   "description": "1. **Hook**: First line grabs attention",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "skills/email-sequence/references/copy-guidelines.md",
-    "syncedAt": "2026-02-04T10:44:54.346Z"
+    "syncedAt": "2026-02-04T15:34:42.937Z"
   },
   "isProtected": false
 }

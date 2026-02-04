@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "cloudflare-api-shield-reference",
+  "kind": "prompt",
+  "source": "github",
   "name": "Cloudflare API Shield Reference",
   "description": "Expert guidance for API Shield - comprehensive API security suite for discovery, protection, and monitoring.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/api-shield/README.md",
-    "syncedAt": "2026-02-04T10:44:53.231Z"
+    "syncedAt": "2026-02-04T15:34:41.433Z"
   },
   "isProtected": false
 }

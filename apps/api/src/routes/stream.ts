@@ -7,6 +7,7 @@ import { getTokenCounter } from '../services/tokens';
 import { getConfig } from '../services/config';
 import { getToolRegistry, getToolExecutor, type ToolContext } from '../services/tools';
 import { getSkillProcessor } from '../services/skills/processor';
+import { getDynamicSkillRegistry } from '../services/skills/dynamic-registry';
 import { getTaskManager } from '../services/tasks';
 import { processAgentOutput } from '../services/table';
 import path from 'path';
@@ -182,7 +183,7 @@ async function processAgentTurn(
       const params = JSON.parse(toolCall.arguments || '{}');
 
       // Check if tool call should be allowed
-      const toolCheck = taskManager.shouldAllowToolCall(
+      const toolCheck = taskManager.getToolCallDecision(
         sessionId,
         toolCall.name,
         params
@@ -672,12 +673,44 @@ stream.post('/sessions/:sessionId/chat', async (c) => {
     content: m.content,
   }));
 
+  // === USER SKILL FILTERING ===
+  // Load user's enabled external skills (CRITICAL: Use registry method, do NOT query DB directly)
+  const registry = getDynamicSkillRegistry();
+  const traceId = `trace-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  const userEnabledSkills = await registry.getEnabledSkillsForUser(user.userId, traceId);
+
+  // Guardrail: If no skills enabled, agent operates in LLM-only mode
+  if (userEnabledSkills.length === 0) {
+    console.info({
+      event: 'no_skills_enabled',
+      userId: user.userId,
+      sessionId,
+      traceId,
+      message: 'User has no enabled skills - operating in LLM-only mode',
+    });
+  }
+
   // Check for skill invocation (slash command)
   const skillProcessor = getSkillProcessor();
   const skillInvocation = skillProcessor.parseCommand(content);
   let skillTools: string[] | undefined;
 
   if (skillInvocation) {
+    // Verify user has access to this skill (if it's an external skill)
+    const requestedSkillName = skillInvocation.skillName.toLowerCase();
+    const hasAccess = userEnabledSkills.some(
+      (skill) =>
+        skill.name.toLowerCase() === requestedSkillName ||
+        skill.aliases.some((alias) => alias.toLowerCase() === requestedSkillName)
+    );
+
+    // If external skill and user doesn't have access, block execution
+    if (!hasAccess && skillInvocation.skill.isExternal) {
+      throw new Error(
+        `Access denied: Skill '${skillInvocation.skillName}' is not enabled for your account. Please enable it in Skills settings.`
+      );
+    }
+
     // Format prompts using skill templates
     const formatted = skillProcessor.formatPrompts(skillInvocation);
 

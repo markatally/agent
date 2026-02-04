@@ -134,6 +134,13 @@ export class PromptRuntime implements SkillRuntime {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
           throw new Error('Expected object output');
         }
+        if (schema.properties && typeof schema.properties === 'object') {
+          for (const key of Object.keys(schema.properties)) {
+            if (!(key in (parsed as Record<string, unknown>))) {
+              throw new Error(`Missing required field: ${key}`);
+            }
+          }
+        }
         if (Array.isArray(schema.required)) {
           for (const field of schema.required) {
             if (!(field in (parsed as Record<string, unknown>))) {
@@ -201,6 +208,7 @@ export class PromptRuntime implements SkillRuntime {
       success: false,
       error: {
         type: errorType,
+        errorType,
         message: error instanceof Error ? error.message : 'Unknown error',
       },
       metrics: {

@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "agent-skills",
+  "kind": "prompt",
+  "source": "github",
   "name": "Agent Skills",
   "description": "[Agent Skills](https://agentskills.io) are a simple, open format for giving agents new capabilities and expertise.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/agentskills/agentskills",
     "repoPath": "README.md",
-    "syncedAt": "2026-02-04T10:44:52.260Z"
+    "syncedAt": "2026-02-04T15:34:39.848Z"
   },
   "isProtected": false
 }

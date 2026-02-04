@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "deployment-details",
+  "kind": "prompt",
+  "source": "github",
   "name": "Deployment Details",
   "description": "Use this reference for service discovery, configuration patterns, quick commands, and common issues.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/render-deploy/references/deployment-details.md",
-    "syncedAt": "2026-02-04T10:44:53.245Z"
+    "syncedAt": "2026-02-04T15:34:41.439Z"
   },
   "isProtected": false
 }

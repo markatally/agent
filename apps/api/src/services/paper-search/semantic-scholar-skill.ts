@@ -66,19 +66,27 @@ export const SemanticScholarSkill: PaperSearchSkill = {
       if (item.year != null) {
         publicationDate = `${item.year}-01-01`;
       }
+      const fallbackUrl = `https://www.semanticscholar.org/paper/${item.paperId ?? ''}`;
+      const resolvedUrl = item.url ?? fallbackUrl;
       return {
         title: item.title ?? 'Untitled',
         authors: item.authors?.map((a) => a.name ?? '').filter(Boolean) ?? [],
         abstract: item.abstract ?? undefined,
-        link: item.url ?? `https://www.semanticscholar.org/paper/${item.paperId ?? ''}`,
+        link: resolvedUrl,
+        url: resolvedUrl,
         source: 'semantic_scholar',
-        doi: item.externalIds?.DOI ?? null,
+        doi: item.externalIds?.DOI ?? undefined,
         arxivId: item.externalIds?.ArXiv ?? null,
         semanticScholarId: item.paperId ?? null,
         publicationDate,
+        publicationDateSource: publicationDate ? 'semantic_scholar' : null,
         venue: item.venue ?? null,
         citationCount: item.citationCount ?? null,
       };
     });
+  },
+
+  async resolveByDoi(): Promise<RawPaperResult | null> {
+    return null;
   },
 };

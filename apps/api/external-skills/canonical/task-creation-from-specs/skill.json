@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "task-creation-from-specs",
+  "kind": "prompt",
+  "source": "github",
   "name": "Task Creation from Specs",
   "description": "Before creating tasks, locate the task database:",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/notion-spec-to-implementation/reference/task-creation.md",
-    "syncedAt": "2026-02-04T10:44:53.246Z"
+    "syncedAt": "2026-02-04T15:34:41.439Z"
   },
   "isProtected": false
 }

@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "google-analytics-4-ga4",
+  "kind": "prompt",
+  "source": "github",
   "name": "Google Analytics 4 (GA4)",
   "description": "Web analytics platform for tracking user behavior, conversions, and marketing performance.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/coreyhaines31/marketingskills",
     "repoPath": "tools/integrations/ga4.md",
-    "syncedAt": "2026-02-04T10:44:54.332Z"
+    "syncedAt": "2026-02-04T15:34:42.934Z"
   },
   "isProtected": false
 }

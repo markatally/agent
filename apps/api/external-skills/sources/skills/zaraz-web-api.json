@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "zaraz-web-api",
+  "kind": "prompt",
+  "source": "github",
   "name": "Zaraz Web API",
   "description": "Client-side JavaScript API for tracking events, setting properties, and managing consent.",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/zaraz/api.md",
-    "syncedAt": "2026-02-04T10:44:53.225Z"
+    "syncedAt": "2026-02-04T15:34:41.431Z"
   },
   "isProtected": false
 }

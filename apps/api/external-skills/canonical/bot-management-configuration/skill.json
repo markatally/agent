@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "bot-management-configuration",
+  "kind": "prompt",
+  "source": "github",
   "name": "Bot Management Configuration",
   "description": "**Note:** Dashboard paths differ between old and new UI:",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/bot-management/configuration.md",
-    "syncedAt": "2026-02-04T10:44:53.226Z"
+    "syncedAt": "2026-02-04T15:34:41.432Z"
   },
   "isProtected": false
 }

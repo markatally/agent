@@ -11,9 +11,11 @@ import type {
   ResolvedPaper,
   PaperSearchOrchestratorInput,
   PaperSearchOrchestratorOutput,
+  AbsoluteDateWindow,
   PublicationDateSource,
   DateConfidence,
 } from './types';
+import { isDateWithinWindow } from './time-range-parser';
 
 const DATE_SOURCE_PRIORITY: Record<string, number> = {
   crossref: 3,
@@ -43,6 +45,23 @@ function groupKey(p: RawPaperResult): string {
 }
 
 /** Merge raw results: keep highest-priority source per field, resolve date by priority */
+function resolveDateSource(paper: RawPaperResult): PublicationDateSource {
+  if (paper.publicationDateSource) return paper.publicationDateSource;
+  if (paper.source === 'arxiv') return 'arxiv_v1';
+  if (paper.source === 'semantic_scholar') return 'semantic_scholar';
+  if (paper.source === 'crossref') return 'crossref';
+  return null;
+}
+
+function normalizeRawPaperResult(paper: RawPaperResult): RawPaperResult {
+  const link = paper.link || paper.url || '';
+  return {
+    ...paper,
+    link,
+    url: paper.url || link,
+  };
+}
+
 function mergeRawResults(groups: Map<string, RawPaperResult[]>): ResolvedPaper[] {
   const resolved: ResolvedPaper[] = [];
   for (const [, papers] of groups) {
@@ -62,8 +81,8 @@ function mergeRawResults(groups: Map<string, RawPaperResult[]>): ResolvedPaper[]
       .filter((p) => p.publicationDate)
       .map((p) => ({
         date: p.publicationDate!,
-        source: p.source === 'arxiv' ? 'arxiv_v1' : p.source === 'semantic_scholar' ? 'semantic_scholar' : p.source === 'crossref' ? 'crossref' : ('other' as PublicationDateSource),
-        priority: DATE_SOURCE_PRIORITY[p.source === 'arxiv' ? 'arxiv_v1' : p.source] ?? 0,
+        source: resolveDateSource(p),
+        priority: DATE_SOURCE_PRIORITY[resolveDateSource(p) ?? ''] ?? 0,
       }))
       .sort((a, b) => b.priority - a.priority);
     if (withDates.length > 0) {
@@ -77,7 +96,7 @@ function mergeRawResults(groups: Map<string, RawPaperResult[]>): ResolvedPaper[]
     let title = base.title;
     let authors = base.authors;
     let abstract = base.abstract;
-    let link = base.link;
+    let link = base.link || base.url || '';
     let source = base.source;
     let doi = base.doi ?? null;
     let arxivId = base.arxivId ?? null;
@@ -96,12 +115,12 @@ function mergeRawResults(groups: Map<string, RawPaperResult[]>): ResolvedPaper[]
       if (!doi && p.doi) doi = p.doi;
       if (!arxivId && p.arxivId) arxivId = p.arxivId;
       if (!semanticScholarId && p.semanticScholarId) semanticScholarId = p.semanticScholarId;
-      const ps = DATE_SOURCE_PRIORITY[p.source] ?? 0;
-      const cs = DATE_SOURCE_PRIORITY[source] ?? 0;
+      const ps = DATE_SOURCE_PRIORITY[resolveDateSource(p) ?? ''] ?? 0;
+      const cs = DATE_SOURCE_PRIORITY[resolveDateSource({ ...p, source }) ?? ''] ?? 0;
       if (ps > cs) {
         title = p.title;
         authors = p.authors;
-        link = p.link;
+        link = p.link || p.url || link;
         source = p.source;
       }
     }
@@ -126,18 +145,39 @@ function mergeRawResults(groups: Map<string, RawPaperResult[]>): ResolvedPaper[]
 }
 
 export interface OrchestratorDeps {
-  getSkill(id: string): PaperSearchSkill | undefined;
+  getSkill?(id: string): PaperSearchSkill | undefined;
+  skills?: PaperSearchSkill[];
   /** Optional: resolve DOI via CrossRef for papers that have DOI but no date */
   crossrefSkill?: PaperSearchSkill;
 }
 
 export function createPaperSearchOrchestrator(deps: OrchestratorDeps) {
-  const { getSkill, crossrefSkill } = deps;
+  const { getSkill, skills, crossrefSkill } = deps;
+  const skillMap = skills
+    ? new Map(skills.map((skill) => [skill.id, skill]))
+    : null;
+  const resolveSkill = (id: string) => {
+    if (skillMap) return skillMap.get(id);
+    return getSkill ? getSkill(id) : undefined;
+  };
+  const inferredCrossrefSkill =
+    crossrefSkill ||
+    (skills ? skills.find((skill) => skill.id === 'crossref') : undefined);
 
   return async function run(
-    input: PaperSearchOrchestratorInput
+    input: PaperSearchOrchestratorInput | { query: string; options: { limit: number; sortBy?: 'relevance' | 'date' | 'citations'; dateRange?: string; absoluteDateWindow?: AbsoluteDateWindow } }
   ): Promise<PaperSearchOrchestratorOutput> {
-    const { query, skillIds, limit, sortBy, dateRange, absoluteDateWindow } = input;
+    const query = input.query;
+    const legacyOptions = 'options' in input ? input.options : undefined;
+    const skillIds = 'options' in input
+      ? (skills?.map((skill) => skill.id) ?? [])
+      : input.skillIds;
+    const limit = 'options' in input ? legacyOptions?.limit ?? 10 : input.limit;
+    const sortBy = 'options' in input ? legacyOptions?.sortBy : input.sortBy;
+    const dateRange = 'options' in input ? legacyOptions?.dateRange : input.dateRange;
+    const absoluteDateWindow = 'options' in input
+      ? legacyOptions?.absoluteDateWindow
+      : input.absoluteDateWindow;
     
     // Pass both legacy dateRange AND new absoluteDateWindow to skills
     // Skills should prefer absoluteDateWindow when available for precise filtering
@@ -153,7 +193,7 @@ export function createPaperSearchOrchestrator(deps: OrchestratorDeps) {
     const allRaw: RawPaperResult[] = [];
     const skillsToRun = skillIds.filter((id) => id !== 'crossref');
     for (const id of skillsToRun) {
-      const skill = getSkill(id);
+      const skill = resolveSkill(id);
       if (!skill) {
         sourcesSkipped.push(id);
         exclusionReasons.push(`Skill not found: ${id}`);
@@ -162,24 +202,38 @@ export function createPaperSearchOrchestrator(deps: OrchestratorDeps) {
       try {
         const results = await skill.search(query, options);
         sourcesQueried.push(id);
-        allRaw.push(...results.map((r) => ({ ...r, source: id })));
+        allRaw.push(
+          ...results.map((r) =>
+            normalizeRawPaperResult({ ...r, source: r.source ?? id })
+          )
+        );
       } catch (e) {
         sourcesSkipped.push(id);
         exclusionReasons.push(`${id}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
     const byKey = new Map<string, RawPaperResult[]>();
+    const titleToKey = new Map<string, string>();
     for (const p of allRaw) {
-      const key = groupKey(p);
-      if (!byKey.has(key)) byKey.set(key, []);
+      const normalizedTitle = normalizeTitle(p.title);
+      let key = groupKey(p);
+      if (!normalizeDoi(p.doi) && titleToKey.has(normalizedTitle)) {
+        key = titleToKey.get(normalizedTitle)!;
+      }
+      if (!byKey.has(key)) {
+        byKey.set(key, []);
+      }
       byKey.get(key)!.push(p);
+      if (normalizedTitle) {
+        titleToKey.set(normalizedTitle, key);
+      }
     }
     let papers = mergeRawResults(byKey);
-    if (crossrefSkill?.resolveByDoi) {
-      const withDoiNoDate = papers.filter((p) => p.doi && !p.publicationDate);
-      for (const paper of withDoiNoDate) {
+    if (inferredCrossrefSkill?.resolveByDoi) {
+      const withDoi = papers.filter((p) => p.doi);
+      for (const paper of withDoi) {
         try {
-          const resolved = await crossrefSkill.resolveByDoi(paper.doi!);
+          const resolved = await inferredCrossrefSkill.resolveByDoi(paper.doi!);
           if (resolved?.publicationDate) {
             papers = papers.map((q) =>
               q.doi && normalizeDoi(q.doi) === normalizeDoi(paper.doi)
@@ -196,6 +250,11 @@ export function createPaperSearchOrchestrator(deps: OrchestratorDeps) {
           // ignore per-DOI failures
         }
       }
+    }
+    if (absoluteDateWindow) {
+      papers = papers.filter((paper) =>
+        isDateWithinWindow(paper.publicationDate, absoluteDateWindow)
+      );
     }
     const sortOrder = sortBy ?? 'relevance';
     if (sortOrder === 'date') {

@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "c3-cli-reference",
+  "kind": "prompt",
+  "source": "github",
   "name": "C3 CLI Reference",
   "description": "```bash",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/openai/skills",
     "repoPath": "skills/.curated/cloudflare-deploy/references/c3/api.md",
-    "syncedAt": "2026-02-04T10:44:53.238Z"
+    "syncedAt": "2026-02-04T15:34:41.437Z"
   },
   "isProtected": false
 }

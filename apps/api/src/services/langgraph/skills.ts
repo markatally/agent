@@ -177,7 +177,7 @@ export class SkillRegistry {
         if (retries > maxRetries) {
           return {
             success: false,
-            error: error instanceof Error ? error.message : String(error),
+            error: this.formatExecutionError(error),
             duration: Date.now() - startTime,
             retries: retries - 1,
           };
@@ -215,11 +215,11 @@ export class SkillRegistry {
       throw new Error('Skill must have a version');
     }
     
-    if (!skill.inputSchema || !(skill.inputSchema instanceof z.ZodType)) {
+    if (!skill.inputSchema || !this.isZodSchema(skill.inputSchema)) {
       throw new Error('Skill must have a valid Zod input schema');
     }
     
-    if (!skill.outputSchema || !(skill.outputSchema instanceof z.ZodType)) {
+    if (!skill.outputSchema || !this.isZodSchema(skill.outputSchema)) {
       throw new Error('Skill must have a valid Zod output schema');
     }
     
@@ -230,6 +230,17 @@ export class SkillRegistry {
     if (this.skills.has(metadata.id)) {
       console.warn(`[SkillRegistry] Overwriting existing skill: ${metadata.id}`);
     }
+  }
+
+  private isZodSchema(value: unknown): value is z.ZodTypeAny {
+    return !!value && typeof (value as z.ZodTypeAny).safeParse === 'function';
+  }
+
+  private formatExecutionError(error: unknown): string {
+    if (error && typeof error === 'object' && (error as any).name === 'ZodError') {
+      return `validation error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    return error instanceof Error ? error.message : String(error);
   }
 }
 

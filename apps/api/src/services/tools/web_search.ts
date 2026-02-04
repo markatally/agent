@@ -21,6 +21,7 @@ import type { ResolvedPaper, AbsoluteDateWindow } from '../paper-search';
 import {
   parseDateRangeString,
   filterPapersByDateWindow,
+  intentToAbsoluteDateWindow,
   isStrictTimeRange,
   describeTimeWindow,
 } from '../paper-search/time-range-parser';
@@ -32,6 +33,8 @@ const SOURCE_TO_SKILL_IDS: Record<SearchSource, string[]> = {
   semantic_scholar: ['semantic_scholar'],
   all: [...DEFAULT_PAPER_SEARCH_SKILL_IDS],
 };
+
+type PaperSearchOrchestrator = ReturnType<typeof createPaperSearchOrchestrator>;
 
 export class WebSearchTool implements Tool {
   name = 'web_search';
@@ -81,12 +84,19 @@ export class WebSearchTool implements Tool {
     required: ['query'],
   };
 
-  private runOrchestrator = createPaperSearchOrchestrator({
-    getSkill: (id) => getPaperSearchSkill(id),
-    crossrefSkill: CrossRefResolverSkill,
-  });
+  private runOrchestrator: PaperSearchOrchestrator;
 
-  constructor(private context: ToolContext) {}
+  constructor(
+    private context: ToolContext,
+    deps?: { runOrchestrator?: PaperSearchOrchestrator }
+  ) {
+    this.runOrchestrator =
+      deps?.runOrchestrator ??
+      createPaperSearchOrchestrator({
+        getSkill: (id) => getPaperSearchSkill(id),
+        crossrefSkill: CrossRefResolverSkill,
+      });
+  }
 
   async execute(
     params: Record<string, unknown>,
@@ -96,8 +106,12 @@ export class WebSearchTool implements Tool {
     const query = String(params.query ?? '').trim();
     try {
       const sourcesParam = (params.sources as SearchSource) || 'all';
+      const parsedTopK = Number(
+        params.topK ?? params.maxResults
+      );
+      const exceededTopK = Number.isFinite(parsedTopK) && parsedTopK > 20;
       const topK = Math.min(
-        Math.max(Number(params.topK) ?? Number(params.maxResults) ?? 5, 1),
+        Math.max(Number.isFinite(parsedTopK) ? parsedTopK : 5, 1),
         20
       );
       const sortBy = (params.sortBy as string) || 'relevance';
@@ -121,7 +135,8 @@ export class WebSearchTool implements Tool {
       // ============================================================
       let absoluteDateWindow: AbsoluteDateWindow | undefined;
       if (dateRange) {
-        absoluteDateWindow = parseDateRangeString(dateRange) ?? undefined;
+        const intent = parseDateRangeString(dateRange);
+        absoluteDateWindow = intent ? intentToAbsoluteDateWindow(intent) : undefined;
         if (absoluteDateWindow) {
           console.log(`[WebSearchTool] Time range parsed: ${describeTimeWindow(absoluteDateWindow)}`);
         }
@@ -193,9 +208,20 @@ export class WebSearchTool implements Tool {
       // ============================================================
       let dateFilteredCount = 0;
       if (absoluteDateWindow && out.papers.length > 0) {
-        const { filtered, reasons } = filterPapersByDateWindow(out.papers, absoluteDateWindow);
+        const evaluated = filterPapersByDateWindow(out.papers, absoluteDateWindow);
+        const filtered = evaluated.filter((paper) => paper.included);
+        const reasons = evaluated
+          .filter((paper) => !paper.included)
+          .map((paper) => paper.exclusionReason)
+          .filter((reason): reason is string => !!reason);
         dateFilteredCount = out.papers.length - filtered.length;
-        out.papers = filtered;
+        out.papers = filtered.map((paper) => {
+          const { included, exclusionReason, ...rest } = paper as ResolvedPaper & {
+            included: boolean;
+            exclusionReason?: string;
+          };
+          return rest;
+        });
         if (reasons.length > 0) {
           out.exclusionReasons.push(...reasons.slice(0, 5)); // Limit to avoid noise
           if (dateFilteredCount > 0) {
@@ -218,7 +244,8 @@ export class WebSearchTool implements Tool {
         searchAttempt > 1,
         usedFallback,
         out.sourcesSkipped,
-        out.exclusionReasons
+        out.exclusionReasons,
+        exceededTopK
       );
 
       // CRITICAL: Zero results is NOT an error - it's informational
@@ -320,7 +347,8 @@ export class WebSearchTool implements Tool {
     usedRetry: boolean,
     usedFallback: boolean,
     sourcesSkipped: string[],
-    exclusionReasons: string[]
+    exclusionReasons: string[],
+    suppressDetails: boolean
   ): string {
     if (results.length === 0) {
       let text = `🔍 Search Results for: "${query}"\n📊 No papers found\n`;
@@ -338,6 +366,11 @@ export class WebSearchTool implements Tool {
     if (sourcesSkipped.length) text += `⚠️ Skipped: ${sourcesSkipped.join(', ')}\n`;
     if (exclusionReasons.length) text += `📋 Notes: ${exclusionReasons.slice(0, 3).join('; ')}\n`;
     text += '='.repeat(60) + '\n\n';
+    if (suppressDetails) {
+      text += 'Results omitted due to requested limit exceeding max (20).';
+      text += '\n\n' + '='.repeat(60) + '\n💡 Use only these results; do not invent papers, venues, or dates.';
+      return text;
+    }
 
     results.forEach((paper, i) => {
       text += `Result ${i + 1}/${results.length}:\n`;

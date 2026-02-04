@@ -256,6 +256,14 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
           <span className="font-semibold text-sm">
             {isUser ? 'You' : 'Assistant'}
           </span>
+          {!isUser && isStreaming ? (
+            <span
+              className="text-xs text-muted-foreground"
+              aria-label="Streaming"
+            >
+              ●
+            </span>
+          ) : null}
           <span className="text-xs text-muted-foreground">
             {formatDistanceToNow(new Date(message.createdAt), {
               addSuffix: true,

@@ -15,6 +15,7 @@ export interface RuntimeResult {
   readonly normalizedOutput?: unknown;
   readonly error?: {
     readonly type: ExecutionErrorType;
+    readonly errorType?: ExecutionErrorType;
     readonly message: string;
     readonly details?: unknown;
   };
@@ -46,5 +47,6 @@ export interface SkillRuntime {
 export interface RuntimeRegistry {
   get(kind: string): SkillRuntime | undefined;
   register(runtime: SkillRuntime): void;
-  list(): readonly SkillRuntime[];
+  list(): readonly string[];
+  has(kind: string): boolean;
 }

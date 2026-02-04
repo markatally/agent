@@ -1,17 +1,30 @@
 {
+  "contractVersion": "1.0.0",
   "canonicalId": "editing-presentations-extended-0-0-0",
+  "kind": "prompt",
+  "source": "github",
   "name": "Editing Presentations",
   "description": "When using an existing presentation as a template:",
   "version": "0.0.0",
   "status": "ACTIVE",
+  "lifecycle": {
+    "status": "active"
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "string"
+  },
   "invocationPattern": "prompt",
   "dependencies": [],
   "capabilityLevel": "EXTERNAL",
   "executionScope": "AGENT",
-  "source": {
+  "sourceInfo": {
     "repoUrl": "https://github.com/anthropics/skills.git",
     "repoPath": "skills/pptx/editing.md",
-    "syncedAt": "2026-02-04T10:44:51.210Z"
+    "syncedAt": "2026-02-04T15:34:38.445Z"
   },
   "isProtected": true,
   "protectionReason": "PPT generation - existing implementation"
