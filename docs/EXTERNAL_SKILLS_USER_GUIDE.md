@@ -6,24 +6,42 @@ External skills allow you to leverage agent skills from community repositories (
 
 ## Quick Start
 
+All external-skills API endpoints require authentication. Include a valid JWT in the `Authorization` header.
+
+### Get an access token
+
+```bash
+# Login (replace with your email/password)
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "password": "your-password"}'
+```
+
+Use the `accessToken` from the response in the `Authorization` header for subsequent requests:
+
+```bash
+export TOKEN="<accessToken from login response>"
+```
+
 ### 1. List Available External Skills
 
 ```bash
-# Using the API
-curl http://localhost:3000/api/skills/external
+# Using the API (with auth)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/external-skills
 
 # Filter by category
-curl http://localhost:3000/api/skills/external?category=development
+curl -H "Authorization: Bearer $TOKEN" "http://localhost:3000/api/external-skills?category=development"
 
 # Search by keyword
-curl http://localhost:3000/api/skills/external?q=react
+curl -H "Authorization: Bearer $TOKEN" "http://localhost:3000/api/external-skills?q=react"
 ```
 
 ### 2. Enable an External Skill
 
 ```bash
 # Enable a skill
-curl -X POST http://localhost:3000/api/skills/external/skill-creator/toggle \
+curl -X POST http://localhost:3000/api/external-skills/skill-creator/toggle \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"enabled": true}'
 ```
@@ -33,7 +51,8 @@ curl -X POST http://localhost:3000/api/skills/external/skill-creator/toggle \
 #### Option A: Via API
 
 ```bash
-curl -X POST http://localhost:3000/api/skills/external/skill-creator/execute \
+curl -X POST http://localhost:3000/api/external-skills/skill-creator/execute \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "input": "Create a skill for data analysis",
@@ -84,7 +103,9 @@ Each external skill has:
 
 ```bash
 # 1. Enable the skill
-curl -X POST http://localhost:3000/api/skills/external/skill-creator/toggle \
+curl -X POST http://localhost:3000/api/external-skills/skill-creator/toggle \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{"enabled": true}'
 
 # 2. Use it via chat
@@ -100,7 +121,9 @@ curl -X POST http://localhost:3000/api/skills/external/skill-creator/toggle \
 
 ```bash
 # 1. Enable the skill
-curl -X POST http://localhost:3000/api/skills/external/pdf/toggle \
+curl -X POST http://localhost:3000/api/external-skills/pdf/toggle \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{"enabled": true}'
 
 # 2. Extract text from PDF
@@ -116,7 +139,9 @@ curl -X POST http://localhost:3000/api/skills/external/pdf/toggle \
 
 ```bash
 # 1. Enable the skill
-curl -X POST http://localhost:3000/api/skills/external/xlsx/toggle \
+curl -X POST http://localhost:3000/api/external-skills/xlsx/toggle \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{"enabled": true}'
 
 # 2. Process Excel file
@@ -134,17 +159,18 @@ curl -X POST http://localhost:3000/api/skills/external/xlsx/toggle \
 
 ```bash
 # Get all skills (product + external)
-curl http://localhost:3000/api/skills/all/list
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/external-skills/all/list
 
 # Filter by category
-curl http://localhost:3000/api/skills/all/list?category=development
+curl -H "Authorization: Bearer $TOKEN" "http://localhost:3000/api/external-skills/all/list?category=development"
 ```
 
 ### Search Skills
 
 ```bash
 # Search for skills related to "testing"
-curl -X POST http://localhost:3000/api/skills/search \
+curl -X POST http://localhost:3000/api/external-skills/search \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "testing"}'
 ```

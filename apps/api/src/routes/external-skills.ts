@@ -4,12 +4,16 @@
  */
 
 import { Hono } from 'hono';
+import { requireAuth, AuthContext } from '../middleware/auth';
 import { getEnhancedSkillProcessor } from '../services/skills/enhanced-processor';
 import { getExternalSkillLoader } from '../services/external-skills/loader';
 import { prisma } from '../services/prisma';
 import { z } from 'zod';
 
-const app = new Hono();
+const app = new Hono<AuthContext>();
+
+// All external-skills routes require authentication
+app.use('*', requireAuth);
 
 // Validation schemas
 const ExecuteSkillSchema = z.object({
