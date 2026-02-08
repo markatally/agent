@@ -43,20 +43,43 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const completeTableBlock = useChatStore((state) => state.completeTableBlock);
   const clearTables = useChatStore((state) => state.clearTables);
   const clearToolCalls = useChatStore((state) => state.clearToolCalls);
+  const clearPptPipeline = useChatStore((state) => state.clearPptPipeline);
   const addReasoningStep = useChatStore((state) => state.addReasoningStep);
   const updateReasoningStep = useChatStore((state) => state.updateReasoningStep);
   const completeReasoningStep = useChatStore((state) => state.completeReasoningStep);
   const clearReasoningSteps = useChatStore((state) => state.clearReasoningSteps);
   const setInspectorTab = useChatStore((state) => state.setInspectorTab);
+  const setInspectorOpen = useChatStore((state) => state.setInspectorOpen);
   const setSelectedMessageId = useChatStore((state) => state.setSelectedMessageId);
   const associateToolCallsWithMessage = useChatStore((state) => state.associateToolCallsWithMessage);
+  const addFileArtifact = useChatStore((state) => state.addFileArtifact);
+  const setSandboxStatus = useChatStore((state) => state.setSandboxStatus);
+  const addTerminalLine = useChatStore((state) => state.addTerminalLine);
+  const addExecutionStep = useChatStore((state) => state.addExecutionStep);
+  const updateExecutionStep = useChatStore((state) => state.updateExecutionStep);
+  const addSandboxFile = useChatStore((state) => state.addSandboxFile);
+  const executionMode = useChatStore((state) => state.executionMode);
+  const startPptPipeline = useChatStore((state) => state.startPptPipeline);
+  const updatePptStep = useChatStore((state) => state.updatePptStep);
+  const addBrowseActivity = useChatStore((state) => state.addBrowseActivity);
+  const setBrowserLaunched = useChatStore((state) => state.setBrowserLaunched);
+  const setBrowserNavigated = useChatStore((state) => state.setBrowserNavigated);
+  const addBrowserAction = useChatStore((state) => state.addBrowserAction);
+  const setBrowserActionScreenshot = useChatStore((state) => state.setBrowserActionScreenshot);
+  const setBrowserClosed = useChatStore((state) => state.setBrowserClosed);
+  const clearBrowserSession = useChatStore((state) => state.clearBrowserSession);
+  const clearFiles = useChatStore((state) => state.clearFiles);
 
-  // Clear tool calls, tables, and message selection when session changes
+  // Clear tool calls, tables, file artifacts, and message selection when session changes
+  // so the new chat does not show files from the previous session
   useEffect(() => {
     clearToolCalls();
     clearTables();
+    clearFiles(sessionId);
+    clearPptPipeline(sessionId);
+    clearBrowserSession(sessionId);
     setSelectedMessageId(null);
-  }, [sessionId, clearToolCalls, clearTables, setSelectedMessageId]);
+  }, [sessionId, clearToolCalls, clearTables, clearFiles, clearPptPipeline, clearBrowserSession, setSelectedMessageId]);
 
   // Scroll to bottom helper
   const scrollToBottom = () => {
@@ -75,7 +98,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       case 'message.start':
         startStreaming(sessionId);
         clearReasoningSteps(sessionId);
-        setInspectorTab('reasoning');
+        clearBrowserSession(sessionId);
         break;
 
       case 'message.delta':
@@ -193,6 +216,158 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
         }
         break;
 
+      case 'ppt.pipeline.start':
+        if (event.data?.steps) {
+          startPptPipeline(sessionId, event.data.steps);
+          setInspectorTab('computer');
+          setInspectorOpen(true);
+        }
+        break;
+
+      case 'ppt.pipeline.step':
+        if (event.data?.step && event.data?.status) {
+          updatePptStep(sessionId, event.data.step, event.data.status);
+        }
+        break;
+
+      case 'browse.activity':
+        if (event.data?.action) {
+          addBrowseActivity(sessionId, event.data);
+        }
+        break;
+
+      case 'browser.launched':
+        setBrowserLaunched(sessionId);
+        setInspectorTab('computer');
+        setInspectorOpen(true);
+        break;
+
+      case 'browser.navigated':
+        if (event.data?.url != null) {
+          setBrowserNavigated(sessionId, event.data.url, event.data.title);
+        }
+        break;
+
+      case 'browser.action':
+        if (event.data?.action) {
+          const actionType = (event.data.action as string).replace('browser_', '') as
+            | 'navigate'
+            | 'click'
+            | 'type'
+            | 'scroll'
+            | 'wait'
+            | 'extract'
+            | 'screenshot';
+          addBrowserAction(sessionId, {
+            id: `browser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: actionType,
+            url: event.data.params?.url,
+            selector: event.data.params?.selector,
+            text: event.data.params?.text,
+            timestamp: Date.now(),
+          });
+        }
+        break;
+
+      case 'browser.screenshot':
+        if (event.data?.screenshot) {
+          setBrowserActionScreenshot(
+            sessionId,
+            `data:image/jpeg;base64,${event.data.screenshot}`
+          );
+        }
+        break;
+
+      case 'browser.closed':
+        setBrowserClosed(sessionId);
+        break;
+
+      case 'inspector.focus':
+        if (event.data?.tab) {
+          setInspectorTab(event.data.tab);
+          setInspectorOpen(true);
+        }
+        break;
+
+      case 'sandbox.provisioning':
+        setSandboxStatus('provisioning');
+        break;
+
+      case 'sandbox.ready':
+        setSandboxStatus('ready');
+        break;
+
+      case 'sandbox.teardown':
+        setSandboxStatus('teardown');
+        break;
+
+      case 'terminal.command':
+      case 'terminal.stdout':
+      case 'terminal.stderr': {
+        const streamType =
+          event.type === 'terminal.command'
+            ? 'command'
+            : event.type === 'terminal.stderr'
+              ? 'stderr'
+              : 'stdout';
+        const content = event.data?.line || event.data?.content || event.data?.command || '';
+        if (content) {
+          addTerminalLine(sessionId, {
+            id: `${event.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            stream: streamType,
+            content,
+            timestamp: Date.now(),
+          });
+        }
+        break;
+      }
+
+      case 'execution.step.start':
+        if (event.data?.stepId) {
+          setSandboxStatus('running');
+          addExecutionStep(sessionId, {
+            stepId: event.data.stepId,
+            label: event.data.label || event.data.description || 'Execution step',
+            status: 'running',
+            startedAt: Date.now(),
+            toolName: event.data.toolName,
+            message: event.data.message,
+          });
+        }
+        break;
+
+      case 'execution.step.update':
+        if (event.data?.stepId) {
+          updateExecutionStep(sessionId, event.data.stepId, {
+            label: event.data.label,
+            message: event.data.message,
+          });
+        }
+        break;
+
+      case 'execution.step.end':
+        if (event.data?.stepId) {
+          updateExecutionStep(sessionId, event.data.stepId, {
+            status: event.data.success === false ? 'failed' : 'completed',
+            completedAt: Date.now(),
+            message: event.data.message,
+          });
+        }
+        break;
+
+      case 'fs.file.created':
+      case 'fs.file.modified':
+        if (event.data?.path) {
+          addSandboxFile(sessionId, {
+            path: event.data.path,
+            size: event.data.size,
+            mimeType: event.data.mimeType,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+        break;
+
       case 'table.start':
         // Table block started - schema is known, data is streaming
         if (event.data?.tableId && event.data?.schema) {
@@ -207,8 +382,24 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
         }
         break;
 
+      case 'file.created':
+        if (event.data?.fileId && event.data?.filename) {
+          const artifact: import('@mark/shared').Artifact = {
+            fileId: event.data.fileId,
+            name: event.data.filename,
+            type: event.data.type || 'file',
+            mimeType: event.data.mimeType,
+            size: event.data.size,
+            content: '',
+          };
+          addFileArtifact(sessionId, artifact);
+        }
+        break;
+
       case 'error':
         console.error('Stream error:', event.data);
+        clearPptPipeline(sessionId);
+        clearBrowserSession(sessionId);
         stopStreaming();
         toast({
           title: 'Stream error',
@@ -255,11 +446,29 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       // User can see their message and the thinking indicator while we stream
       setIsSending(false);
 
+      const lowerContent = content.toLowerCase();
+      const looksLikePpt = ['ppt', 'presentation', 'powerpoint', 'slides'].some(
+        (keyword) => lowerContent.includes(keyword)
+      );
+      if (looksLikePpt) {
+        startPptPipeline(sessionId, [
+          { id: 'research', label: 'Research', status: 'pending' },
+          { id: 'browsing', label: 'Browsing', status: 'pending' },
+          { id: 'reading', label: 'Reading', status: 'pending' },
+          { id: 'synthesizing', label: 'Synthesizing', status: 'pending' },
+          { id: 'generating', label: 'Generating files', status: 'pending' },
+          { id: 'finalizing', label: 'Finalizing', status: 'pending' },
+        ]);
+        setInspectorTab('computer');
+        setInspectorOpen(true);
+      }
+
       // Stream response from backend
       for await (const event of apiClient.chat.sendAndStream(
         sessionId,
         content,
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        { executionMode }
       )) {
         handleSSEEvent(event);
       }

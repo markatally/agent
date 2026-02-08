@@ -106,12 +106,28 @@ export class PptGeneratorTool implements Tool {
     try {
       const normalizedParams: Record<string, any> = { ...(params || {}) };
 
-      // Normalize common LLM mistakes
+      // Normalize common LLM mistakes (including truncated JSON from LLM tool calls)
       if (typeof normalizedParams.presentation === 'string') {
+        const raw = normalizedParams.presentation.trim();
         try {
-          normalizedParams.presentation = JSON.parse(normalizedParams.presentation);
+          normalizedParams.presentation = JSON.parse(raw);
         } catch {
-          // Keep as-is; validation below will handle invalid structure
+          // Try to repair truncated JSON (e.g. "{\"title\": \"...\"" with no closing braces)
+          let repaired: unknown = null;
+          for (const suffix of [',"slides":[]}', '}']) {
+            try {
+              repaired = JSON.parse(raw + suffix);
+              break;
+            } catch {
+              /* try next */
+            }
+          }
+          if (repaired && typeof repaired === 'object' && repaired !== null && 'title' in repaired) {
+            const obj = repaired as Record<string, unknown>;
+            if (!Array.isArray(obj.slides)) obj.slides = [];
+            normalizedParams.presentation = obj;
+          }
+          // Otherwise keep as-is; validation below will return "Presentation data is required"
         }
       }
 
@@ -313,7 +329,6 @@ export class PptGeneratorTool implements Tool {
 📄 Filename: ${safeFilename}
 📊 Slides: ${presentation.slides.length + 1} (including title slide)
 📦 Size: ${sizeKB} KB
-📍 Location: outputs/ppt/${safeFilename}
 
 The presentation is ready for download.`;
 

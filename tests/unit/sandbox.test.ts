@@ -66,10 +66,34 @@ describe('Phase 6.1: Docker Sandbox', () => {
       expect(typeof manager.getSandboxStatus).toBe('function');
     });
 
+    it('should have getFileTree method', () => {
+      const manager = getSandboxManager();
+      expect(typeof manager.getFileTree).toBe('function');
+    });
+
+    it('should have exportArtifacts method', () => {
+      const manager = getSandboxManager();
+      expect(typeof manager.exportArtifacts).toBe('function');
+    });
+
     it('should return null status for non-existent session', async () => {
       const manager = getSandboxManager();
       const status = await manager.getSandboxStatus('non-existent-session');
       expect(status).toBeNull();
+    });
+
+    it('should return empty file tree for non-existent session', async () => {
+      const manager = getSandboxManager();
+      const tree = await manager.getFileTree('non-existent-session');
+      expect(Array.isArray(tree)).toBe(true);
+      expect(tree.length).toBe(0);
+    });
+
+    it('should return empty artifacts for non-existent session', async () => {
+      const manager = getSandboxManager();
+      const artifacts = await manager.exportArtifacts('non-existent-session', ['output.pptx']);
+      expect(Array.isArray(artifacts)).toBe(true);
+      expect(artifacts.length).toBe(0);
     });
 
     it('should have cleanup method', () => {

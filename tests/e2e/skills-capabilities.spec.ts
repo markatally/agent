@@ -12,6 +12,14 @@ import { test, expect, type Page } from '@playwright/test';
 
 // Helper functions
 async function login(page: Page) {
+  // Ensure test user exists
+  await page.request.post('/api/auth/register', {
+    data: {
+      email: 'test@example.com',
+      password: 'test-password',
+    },
+  });
+
   await page.goto('/');
   
   // Check if already logged in
@@ -21,19 +29,21 @@ async function login(page: Page) {
   }
 
   // Navigate to login
-  await page.click('text=Sign In');
+  await page.goto('/login');
   
   // Fill login form
   await page.fill('input[type="email"]', 'test@example.com');
   await page.fill('input[type="password"]', 'test-password');
-  await page.click('button:has-text("Sign In")');
+  await page.click('button:has-text("Log in")');
   
   // Wait for redirect to chat
-  await page.waitForURL(/\//);
+  await page.waitForURL(/\/chat/);
+  await page.waitForSelector('[data-testid="chat-input"]', { timeout: 30000 });
 }
 
 async function openSkillsModal(page: Page) {
   // Click settings/gear icon
+  await page.waitForSelector('[data-testid="settings-button"]', { timeout: 30000 });
   await page.click('[data-testid="settings-button"]');
   
   // Click Skills option
@@ -45,15 +55,32 @@ async function openSkillsModal(page: Page) {
 
 async function enableSkill(page: Page, skillName: string) {
   await openSkillsModal(page);
+
+  // Ensure we are in the "All" scope to find any skill
+  const allTab = page.locator('button:has-text("All")').first();
+  if (await allTab.isVisible()) {
+    await allTab.click();
+  }
   
   // Search for skill
   await page.fill('input[placeholder*="Search"]', skillName);
   
   // Wait for skill to appear
-  await page.waitForSelector(`text=${skillName}`);
+  const skillCard = page.locator('[data-testid="skill-card"]').filter({ hasText: skillName });
+  await expect(skillCard).toBeVisible();
   
-  // Click Add button
-  await page.locator(`text=${skillName}`).locator('..').locator('button:has-text("Add")').click();
+  const addButton = skillCard.locator('button:has-text("Add")');
+  if (await addButton.count()) {
+    await addButton.click();
+  } else {
+    const toggle = skillCard.locator('button[role="switch"]');
+    if (await toggle.count()) {
+      const state = await toggle.getAttribute('data-state');
+      if (state === 'unchecked') {
+        await toggle.click();
+      }
+    }
+  }
   
   // Save changes
   await page.click('button:has-text("Save")');
@@ -73,6 +100,19 @@ async function disableSkill(page: Page, skillName: string) {
   
   // Wait for modal to close
   await expect(page.locator('[role="dialog"]')).not.toBeVisible();
+}
+
+async function removeAllSkills(page: Page): Promise<boolean> {
+  await openSkillsModal(page);
+  const removeButtons = page.locator('[title="Remove skill"]');
+  let safety = 0;
+  let removed = false;
+  while ((await removeButtons.count()) > 0 && safety < 25) {
+    await removeButtons.first().click();
+    removed = true;
+    safety += 1;
+  }
+  return removed;
 }
 
 async function startNewChat(page: Page) {
@@ -95,26 +135,19 @@ async function getLastAssistantMessage(page: Page): Promise<string> {
   return await lastMessage.textContent() || '';
 }
 
-test.describe('Agent Skill Capabilities', () => {
-  test.beforeEach(async ({ page }) => {
-    await login(page);
-  });
+test.describe('Skills Capabilities E2E', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  test.describe('Agent Skill Capabilities', () => {
+    test.beforeEach(async ({ page }) => {
+      await login(page);
+    });
 
   test('agent should list only enabled skills', async ({ page }) => {
     // Clear all skills first
-    await openSkillsModal(page);
-    
-    // Remove all enabled skills (if any)
-    const removeButtons = await page.locator('[title="Remove skill"]').all();
-    for (const button of removeButtons) {
-      await button.click();
-    }
-    if (removeButtons.length > 0) {
-      await page.click('button:has-text("Save")');
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible();
-    } else {
-      await page.click('button:has-text("Cancel")');
-    }
+    const removed = await removeAllSkills(page);
+    await page.click(removed ? 'button:has-text("Save")' : 'button:has-text("Cancel")');
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible();
 
     // Enable a specific skill
     await enableSkill(page, '1:1 Meeting Template');
@@ -136,17 +169,9 @@ test.describe('Agent Skill Capabilities', () => {
 
   test('agent should update when skills change mid-session', async ({ page }) => {
     // Start with one skill
-    await openSkillsModal(page);
-    const removeButtons = await page.locator('[title="Remove skill"]').all();
-    for (const button of removeButtons) {
-      await button.click();
-    }
-    if (removeButtons.length > 0) {
-      await page.click('button:has-text("Save")');
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible();
-    } else {
-      await page.click('button:has-text("Cancel")');
-    }
+    const removed = await removeAllSkills(page);
+    await page.click(removed ? 'button:has-text("Save")' : 'button:has-text("Cancel")');
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible();
 
     await enableSkill(page, '1:1 Meeting Template');
     
@@ -174,19 +199,9 @@ test.describe('Agent Skill Capabilities', () => {
 
   test('agent should show no skills when all disabled', async ({ page }) => {
     // Remove all skills
-    await openSkillsModal(page);
-    
-    const removeButtons = await page.locator('[title="Remove skill"]').all();
-    for (const button of removeButtons) {
-      await button.click();
-    }
-    
-    if (removeButtons.length > 0) {
-      await page.click('button:has-text("Save")');
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible();
-    } else {
-      await page.click('button:has-text("Cancel")');
-    }
+    const removed = await removeAllSkills(page);
+    await page.click(removed ? 'button:has-text("Save")' : 'button:has-text("Cancel")');
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible();
     
     // Start new chat
     await startNewChat(page);
@@ -219,12 +234,12 @@ test.describe('Agent Skill Capabilities', () => {
     // SHOULD mention the enabled skill
     expect(response.toLowerCase()).toContain('1:1 meeting template');
   });
-});
-
-test.describe('Skills Modal Scrolling', () => {
-  test.beforeEach(async ({ page }) => {
-    await login(page);
   });
+
+  test.describe('Skills Modal Scrolling', () => {
+    test.beforeEach(async ({ page }) => {
+      await login(page);
+    });
 
   test('skills modal should be scrollable with many skills', async ({ page }) => {
     await openSkillsModal(page);
@@ -234,7 +249,7 @@ test.describe('Skills Modal Scrolling', () => {
     await expect(modal).toBeVisible();
     
     // Check for scroll area
-    const scrollArea = modal.locator('[data-radix-scroll-area-viewport]');
+    const scrollArea = page.locator('[data-testid="skills-scroll"]');
     await expect(scrollArea).toBeVisible();
     
     // Try to scroll (if enough skills exist)
@@ -274,5 +289,6 @@ test.describe('Skills Modal Scrolling', () => {
     
     // Should have at least a few skills
     expect(count).toBeGreaterThan(0);
+  });
   });
 });

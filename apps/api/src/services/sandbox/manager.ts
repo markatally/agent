@@ -5,12 +5,15 @@
 
 import Docker from 'dockerode';
 import fs from 'fs';
+import path from 'path';
 import type {
   SandboxConfig,
   SandboxExecResult,
   ContainerInfo,
   CreateSandboxOptions,
   ExecOptions,
+  SandboxArtifactInfo,
+  SandboxFileTreeNode,
 } from './types';
 import { getConfig } from '../config';
 
@@ -387,6 +390,75 @@ export class SandboxManager {
   }
 
   /**
+   * Get a snapshot of the sandbox workspace file tree
+   */
+  async getFileTree(sessionId: string): Promise<SandboxFileTreeNode[]> {
+    const containerInfo = this.containers.get(sessionId);
+    if (!containerInfo) return [];
+
+    const rootDir = containerInfo.workspaceDir;
+    const walk = async (currentPath: string): Promise<SandboxFileTreeNode[]> => {
+      const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
+      const nodes: SandboxFileTreeNode[] = [];
+
+      for (const entry of entries) {
+        const fullPath = path.join(currentPath, entry.name);
+        const relPath = path.relative(rootDir, fullPath);
+        if (entry.isDirectory()) {
+          const children = await walk(fullPath);
+          nodes.push({
+            path: relPath || entry.name,
+            type: 'directory',
+            children,
+          });
+        } else {
+          const stat = await fs.promises.stat(fullPath);
+          nodes.push({
+            path: relPath || entry.name,
+            type: 'file',
+            size: stat.size,
+          });
+        }
+      }
+
+      return nodes;
+    };
+
+    return walk(rootDir);
+  }
+
+  /**
+   * Export artifact metadata from workspace paths
+   */
+  async exportArtifacts(sessionId: string, pathsToExport: string[]): Promise<SandboxArtifactInfo[]> {
+    const containerInfo = this.containers.get(sessionId);
+    if (!containerInfo) return [];
+
+    const rootDir = containerInfo.workspaceDir;
+    const results: SandboxArtifactInfo[] = [];
+
+    for (const item of pathsToExport) {
+      const resolved = path.resolve(rootDir, item);
+      if (!resolved.startsWith(rootDir)) {
+        continue;
+      }
+      try {
+        const stat = await fs.promises.stat(resolved);
+        if (!stat.isFile()) continue;
+        results.push({
+          path: path.relative(rootDir, resolved),
+          size: stat.size,
+          mimeType: this.getMimeType(resolved),
+        });
+      } catch {
+        // Ignore missing files
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Parse memory string to bytes
    */
   private parseMemory(memory: string): number {
@@ -404,6 +476,38 @@ export class SandboxManager {
     };
 
     return Math.floor(value * (multipliers[unit] || multipliers.MB));
+  }
+
+  /**
+   * Get MIME type from file extension
+   */
+  private getMimeType(filename: string): string {
+    const ext = path.extname(filename).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.txt': 'text/plain',
+      '.md': 'text/markdown',
+      '.json': 'application/json',
+      '.yaml': 'text/yaml',
+      '.yml': 'text/yaml',
+      '.js': 'application/javascript',
+      '.ts': 'application/typescript',
+      '.py': 'text/x-python',
+      '.go': 'text/x-go',
+      '.rs': 'text/x-rust',
+      '.java': 'text/x-java',
+      '.html': 'text/html',
+      '.css': 'text/css',
+      '.sql': 'application/sql',
+      '.sh': 'application/x-sh',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.pdf': 'application/pdf',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+    return mimeTypes[ext] || 'application/octet-stream';
   }
 
   /**

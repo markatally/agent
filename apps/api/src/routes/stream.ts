@@ -8,10 +8,18 @@ import { getConfig } from '../services/config';
 import { getToolRegistry, getToolExecutor, type ToolContext } from '../services/tools';
 import { getSkillProcessor } from '../services/skills/processor';
 import { getDynamicSkillRegistry } from '../services/skills/dynamic-registry';
-import { getTaskManager } from '../services/tasks';
+import { getTaskManager, PptPipelineController } from '../services/tasks';
 import { processAgentOutput } from '../services/table';
 import path from 'path';
 import { getExternalSkillLoader } from '../services/external-skills/loader';
+import { getSandboxManager, SandboxOrchestrator } from '../services/sandbox';
+import { getBrowserManager, wrapExecutorWithBrowserEvents } from '../services/browser';
+import type { ExecutionMode, InspectorTab } from '@mark/shared';
+
+/** Prisma P2003 = foreign key constraint violated (e.g. session deleted during stream) */
+function isPrismaForeignKeyError(err: unknown): boolean {
+  return (err as { code?: string })?.code === 'P2003';
+}
 
 // LangGraph imports (optional - for graph-based agent execution)
 import {
@@ -51,6 +59,20 @@ type StreamEventType =
   | 'tool.progress'
   | 'tool.complete'
   | 'tool.error'
+  | 'inspector.focus'
+  | 'sandbox.provisioning'
+  | 'sandbox.ready'
+  | 'sandbox.teardown'
+  | 'sandbox.fallback'
+  | 'execution.step.start'
+  | 'execution.step.update'
+  | 'execution.step.end'
+  | 'terminal.command'
+  | 'terminal.stdout'
+  | 'terminal.stderr'
+  | 'fs.file.created'
+  | 'fs.file.modified'
+  | 'fs.tree.snapshot'
   | 'error'
   | 'session.end'
   | 'file.created'
@@ -62,6 +84,22 @@ interface StreamEvent {
   timestamp: number;
   data: any;
 }
+
+const inferFocusTab = (
+  goal: { requiresPPT?: boolean; requiresSearch?: boolean } | null,
+  executionMode: ExecutionMode
+): { tab: InspectorTab; reason: string } => {
+  if (executionMode === 'sandbox') {
+    return { tab: 'computer', reason: 'Sandbox execution enabled' };
+  }
+  if (goal?.requiresPPT) {
+    return { tab: 'computer', reason: 'Presentation generation uses Computer view' };
+  }
+  if (goal?.requiresSearch) {
+    return { tab: 'sources', reason: 'Search results and citations' };
+  }
+  return { tab: 'reasoning', reason: 'Default reasoning trace' };
+};
 
 /**
  * Process a single agent turn with continuation loop support
@@ -444,7 +482,7 @@ async function processAgentTurn(
         });
 
         // Record tool call
-        taskManager.recordToolCall(sessionId, toolCall.name, params, result);
+        taskManager.recordToolCall(sessionId, toolCall.name, params, result, result.success);
 
         // Save to database
         await prisma.toolCall.create({
@@ -523,6 +561,8 @@ async function processAgentTurn(
         });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Tool execution failed';
+
+        taskManager.recordToolCall(sessionId, toolCall.name, params, undefined, false);
 
         // Add error to history
         currentMessages.push({
@@ -782,20 +822,41 @@ IMPORTANT RULES:
   // Always initialize fresh task per user message (one task per request-response cycle)
   taskManager.clearTask(sessionId);
   const taskState = taskManager.initializeTask(sessionId, user.userId, latestUserMessage.content);
+  const executionMode: ExecutionMode = 'direct';
 
   return streamSSE(c, async (sseStream) => {
     const llmClient = getLLMClient();
-    const toolExecutor = getToolExecutor(toolContext);
+    const baseToolExecutor = getToolExecutor(toolContext);
     const startTime = Date.now();
+    const pipelineEnabled = config.execution?.pptPipeline?.enabled !== false;
+    const pipelineController =
+      pipelineEnabled && taskState?.goal?.requiresPPT
+        ? new PptPipelineController(sessionId, sseStream.writeSSE.bind(sseStream))
+        : null;
+    const activeStream = pipelineController ? pipelineController.wrapStream(sseStream) : sseStream;
+    const toolExecutor =
+      getBrowserManager().isEnabled() && activeStream
+        ? wrapExecutorWithBrowserEvents({ sessionId, toolExecutor: baseToolExecutor, sseStream: activeStream })
+        : baseToolExecutor;
 
     try {
       // Send message.start event
-      await sseStream.writeSSE({
+      await activeStream.writeSSE({
         data: JSON.stringify({
           type: 'message.start',
           sessionId,
           timestamp: Date.now(),
           data: { messageId: null },
+        }),
+      });
+
+      const focus = inferFocusTab(taskState?.goal || null, executionMode);
+      await activeStream.writeSSE({
+        data: JSON.stringify({
+          type: 'inspector.focus',
+          sessionId,
+          timestamp: Date.now(),
+          data: focus,
         }),
       });
 
@@ -821,50 +882,121 @@ IMPORTANT RULES:
       }
 
       // Process agent turn with continuation loop
-      const result = await processAgentTurn(
-        sessionId,
-        baseMessages,
-        tools,
-        toolContext,
-        taskManager,
-        prisma,
-        llmClient,
-        toolExecutor,
-        sseStream,
-        startTime
-      );
+      let result: any;
+      if (executionMode === 'sandbox') {
+        const sandboxManager = getSandboxManager();
+        if (!sandboxManager.isEnabled()) {
+          await activeStream.writeSSE({
+            data: JSON.stringify({
+              type: 'sandbox.fallback',
+              sessionId,
+              timestamp: Date.now(),
+              data: { reason: 'Sandbox is disabled' },
+            }),
+          });
+          result = await processAgentTurn(
+            sessionId,
+            baseMessages,
+            tools,
+            toolContext,
+            taskManager,
+            prisma,
+            llmClient,
+            toolExecutor,
+            activeStream,
+            startTime
+          );
+        } else {
+          try {
+            const orchestrator = new SandboxOrchestrator(sandboxManager);
+            result = await orchestrator.execute({
+              sessionId,
+              messages: baseMessages,
+              tools,
+              toolContext,
+              taskManager,
+              prisma,
+              llmClient,
+              startTime,
+              toolExecutor,
+              sseStream: activeStream,
+              processAgentTurn,
+            });
+          } catch (error: any) {
+            await activeStream.writeSSE({
+              data: JSON.stringify({
+                type: 'sandbox.fallback',
+                sessionId,
+                timestamp: Date.now(),
+                data: { reason: error?.message || 'Sandbox execution failed' },
+              }),
+            });
+            result = await processAgentTurn(
+              sessionId,
+              baseMessages,
+              tools,
+              toolContext,
+              taskManager,
+              prisma,
+              llmClient,
+              toolExecutor,
+              activeStream,
+              startTime
+            );
+          }
+        }
+      } else {
+        result = await processAgentTurn(
+          sessionId,
+          baseMessages,
+          tools,
+          toolContext,
+          taskManager,
+          prisma,
+          llmClient,
+          toolExecutor,
+          activeStream,
+          startTime
+        );
+      }
 
       // Save final assistant message to database
-      const assistantMessage = await prisma.message.create({
-        data: {
-          sessionId,
-          role: 'assistant',
-          content: result.content,
-          metadata: {
-            finishReason: result.finishReason,
-            model: llmClient.getModel(),
-            stepsTaken: result.stepsTaken,
-            reasoningSteps: result.reasoningSteps,
+      try {
+        const assistantMessage = await prisma.message.create({
+          data: {
+            sessionId,
+            role: 'assistant',
+            content: result.content,
+            metadata: {
+              finishReason: result.finishReason,
+              model: llmClient.getModel(),
+              stepsTaken: result.stepsTaken,
+              reasoningSteps: result.reasoningSteps,
+            },
           },
-        },
-      });
+        });
 
-      await prisma.toolCall.updateMany({
-        where: { sessionId, messageId: null },
-        data: { messageId: assistantMessage.id },
-      });
+        await prisma.toolCall.updateMany({
+          where: { sessionId, messageId: null },
+          data: { messageId: assistantMessage.id },
+        });
 
-      // Update session lastActiveAt
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: { lastActiveAt: new Date() },
-      });
-
+        await prisma.session.update({
+          where: { id: sessionId },
+          data: { lastActiveAt: new Date() },
+        });
+      } catch (persistError) {
+        if (isPrismaForeignKeyError(persistError)) {
+          console.warn('Session no longer exists, skipping assistant message persistence (GET /stream)');
+        } else {
+          throw persistError;
+        }
+      }
     } catch (error) {
       console.error('Stream error:', error);
 
       // Send error event
-      await sseStream.writeSSE({
+      await activeStream.writeSSE({
         data: JSON.stringify({
           type: 'error',
           sessionId,
@@ -893,9 +1025,13 @@ stream.post('/sessions/:sessionId/chat', async (c) => {
 
   // Parse request body
   let content: string;
+  let executionMode: ExecutionMode = 'direct';
   try {
     const body = await c.req.json();
     content = body.content;
+    if (body.execution_mode === 'sandbox') {
+      executionMode = 'sandbox';
+    }
     if (!content || typeof content !== 'string') {
       return c.json(
         {
@@ -1126,17 +1262,37 @@ IMPORTANT RULES:
 
   return streamSSE(c, async (sseStream) => {
     const llmClient = getLLMClient();
-    const toolExecutor = getToolExecutor(toolContext);
+    const baseToolExecutor = getToolExecutor(toolContext);
     const startTime = Date.now();
+    const pipelineEnabled = config.execution?.pptPipeline?.enabled !== false;
+    const pipelineController =
+      pipelineEnabled && taskState?.goal?.requiresPPT
+        ? new PptPipelineController(sessionId, sseStream.writeSSE.bind(sseStream))
+        : null;
+    const activeStream = pipelineController ? pipelineController.wrapStream(sseStream) : sseStream;
+    const toolExecutor =
+      getBrowserManager().isEnabled() && activeStream
+        ? wrapExecutorWithBrowserEvents({ sessionId, toolExecutor: baseToolExecutor, sseStream: activeStream })
+        : baseToolExecutor;
 
     try {
       // Send message.start event with user message ID
-      await sseStream.writeSSE({
+      await activeStream.writeSSE({
         data: JSON.stringify({
           type: 'message.start',
           sessionId,
           timestamp: Date.now(),
           data: { userMessageId: userMessage.id },
+        }),
+      });
+
+      const focus = inferFocusTab(taskState?.goal || null, executionMode);
+      await activeStream.writeSSE({
+        data: JSON.stringify({
+          type: 'inspector.focus',
+          sessionId,
+          timestamp: Date.now(),
+          data: focus,
         }),
       });
 
@@ -1178,45 +1334,53 @@ IMPORTANT RULES:
         prisma,
         llmClient,
         toolExecutor,
-        sseStream,
+        activeStream,
         startTime
       );
 
       // Save final assistant message to database
-      const assistantMessage = await prisma.message.create({
-        data: {
-          sessionId,
-          role: 'assistant',
-          content: result.content,
-          metadata: {
-            finishReason: result.finishReason,
-            model: llmClient.getModel(),
-            stepsTaken: result.stepsTaken,
-            reasoningSteps: result.reasoningSteps,
+      let assistantMessage: { id: string } | null = null;
+      try {
+        assistantMessage = await prisma.message.create({
+          data: {
+            sessionId,
+            role: 'assistant',
+            content: result.content,
+            metadata: {
+              finishReason: result.finishReason,
+              model: llmClient.getModel(),
+              stepsTaken: result.stepsTaken,
+              reasoningSteps: result.reasoningSteps,
+            },
           },
-        },
-      });
+        });
 
-      await prisma.toolCall.updateMany({
-        where: { sessionId, messageId: null },
-        data: { messageId: assistantMessage.id },
-      });
+        await prisma.toolCall.updateMany({
+          where: { sessionId, messageId: null },
+          data: { messageId: assistantMessage.id },
+        });
 
-      // Update session lastActiveAt
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: { lastActiveAt: new Date() },
-      });
+        await prisma.session.update({
+          where: { id: sessionId },
+          data: { lastActiveAt: new Date() },
+        });
+      } catch (persistError) {
+        if (isPrismaForeignKeyError(persistError)) {
+          console.warn('Session no longer exists, skipping assistant message persistence (POST /chat)');
+        } else {
+          throw persistError;
+        }
+      }
 
-      // Send message.complete event
-      await sseStream.writeSSE({
+      // Send message.complete event (assistantMessageId null if persistence skipped)
+      await activeStream.writeSSE({
         data: JSON.stringify({
           type: 'message.complete',
           sessionId,
           timestamp: Date.now(),
           data: {
             userMessageId: userMessage.id,
-            assistantMessageId: assistantMessage.id,
+            assistantMessageId: assistantMessage?.id ?? null,
             finishReason: result.finishReason,
           },
         }),
@@ -1225,7 +1389,7 @@ IMPORTANT RULES:
       console.error('Stream error:', error);
 
       // Send error event
-      await sseStream.writeSSE({
+      await activeStream.writeSSE({
         data: JSON.stringify({
           type: 'error',
           sessionId,
@@ -1408,25 +1572,34 @@ stream.post('/sessions/:sessionId/agent', async (c) => {
         finalContent = processAgentOutput(finalContent);
 
         // Save assistant message
-        const assistantMessage = await prisma.message.create({
-          data: {
-            sessionId,
-            role: 'assistant',
-            content: finalContent,
-            metadata: {
-              source: 'langgraph',
-              scenario: finalState.parsedIntent?.scenario,
-              executionPath: result.executionPath,
-              duration: result.totalDuration,
-              reasoningSteps: [],
+        let assistantMessage: { id: string } | null = null;
+        try {
+          assistantMessage = await prisma.message.create({
+            data: {
+              sessionId,
+              role: 'assistant',
+              content: finalContent,
+              metadata: {
+                source: 'langgraph',
+                scenario: finalState.parsedIntent?.scenario,
+                executionPath: result.executionPath,
+                duration: result.totalDuration,
+                reasoningSteps: [],
+              },
             },
-          },
-        });
+          });
 
-        await prisma.toolCall.updateMany({
-          where: { sessionId, messageId: null },
-          data: { messageId: assistantMessage.id },
-        });
+          await prisma.toolCall.updateMany({
+            where: { sessionId, messageId: null },
+            data: { messageId: assistantMessage.id },
+          });
+        } catch (persistError) {
+          if (isPrismaForeignKeyError(persistError)) {
+            console.warn('Session no longer exists, skipping assistant message persistence (POST /agent success)');
+          } else {
+            throw persistError;
+          }
+        }
 
         // Send completion events
         await sseStream.writeSSE({
@@ -1445,7 +1618,7 @@ stream.post('/sessions/:sessionId/agent', async (c) => {
             timestamp: Date.now(),
             data: {
               userMessageId: userMessage.id,
-              assistantMessageId: assistantMessage.id,
+              assistantMessageId: assistantMessage?.id ?? null,
               scenario: finalState.parsedIntent?.scenario,
               finishReason: 'stop',
             },
@@ -1458,19 +1631,27 @@ stream.post('/sessions/:sessionId/agent', async (c) => {
         const errorMessages = errors.map(e => e.message).join('; ');
         
         // Save error response
-        const assistantMessage = await prisma.message.create({
-          data: {
-            sessionId,
-            role: 'assistant',
-            content: `Agent execution failed: ${errorMessages}`,
-            metadata: {
-              source: 'langgraph',
-              status: 'failed',
-              errors: errors.map(e => ({ code: e.code, message: e.message })),
-              executionPath: result.executionPath,
+        try {
+          await prisma.message.create({
+            data: {
+              sessionId,
+              role: 'assistant',
+              content: `Agent execution failed: ${errorMessages}`,
+              metadata: {
+                source: 'langgraph',
+                status: 'failed',
+                errors: errors.map(e => ({ code: e.code, message: e.message })),
+                executionPath: result.executionPath,
+              },
             },
-          },
-        });
+          });
+        } catch (persistError) {
+          if (isPrismaForeignKeyError(persistError)) {
+            console.warn('Session no longer exists, skipping assistant message persistence (POST /agent failure)');
+          } else {
+            throw persistError;
+          }
+        }
 
         await sseStream.writeSSE({
           data: JSON.stringify({
@@ -1488,10 +1669,18 @@ stream.post('/sessions/:sessionId/agent', async (c) => {
       }
 
       // Update session lastActiveAt
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: { lastActiveAt: new Date() },
-      });
+      try {
+        await prisma.session.update({
+          where: { id: sessionId },
+          data: { lastActiveAt: new Date() },
+        });
+      } catch (persistError) {
+        if (isPrismaForeignKeyError(persistError)) {
+          console.warn('Session no longer exists, skipping session lastActiveAt update');
+        } else {
+          throw persistError;
+        }
+      }
 
     } catch (error) {
       console.error('Agent error:', error);

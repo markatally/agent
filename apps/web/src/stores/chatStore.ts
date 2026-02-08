@@ -1,5 +1,21 @@
 import { create } from 'zustand';
-import type { Message, ToolResult, Artifact, TableIR, TableIRSchema } from '@mark/shared';
+import type {
+  Message,
+  ToolResult,
+  Artifact,
+  TableIR,
+  TableIRSchema,
+  ExecutionMode,
+  InspectorTab,
+} from '@mark/shared';
+import type {
+  BrowseActivity,
+  PptPipelineStep,
+  PptStep,
+  PptStepStatus,
+  BrowserSessionState,
+  BrowserAction,
+} from '../types';
 
 interface ToolCallStatus {
   sessionId: string;
@@ -53,12 +69,51 @@ interface CompletedTableState {
   isStreaming: false;
 }
 
+type SandboxStatus = 'idle' | 'provisioning' | 'ready' | 'running' | 'teardown';
+
+interface TerminalLine {
+  id: string;
+  stream: 'stdout' | 'stderr' | 'command';
+  content: string;
+  timestamp: number;
+}
+
+interface ExecutionStepUI {
+  stepId: string;
+  label: string;
+  status: 'planned' | 'running' | 'completed' | 'failed';
+  startedAt?: number;
+  completedAt?: number;
+  toolName?: string;
+  message?: string;
+}
+
+interface SandboxFileEntry {
+  path: string;
+  size?: number;
+  mimeType?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+interface PptPipelineState {
+  steps: PptPipelineStep[];
+  currentStep?: PptStep;
+  browseActivity: BrowseActivity[];
+}
+
 const SIDEBAR_OPEN_STORAGE_KEY = 'sidebar-open';
+const EXECUTION_MODE_STORAGE_KEY = 'execution-mode';
 
 const getInitialSidebarOpen = () => {
   const stored = localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY);
   if (stored === null) return true;
   return stored === 'true';
+};
+
+const getInitialExecutionMode = (): ExecutionMode => {
+  const stored = localStorage.getItem(EXECUTION_MODE_STORAGE_KEY);
+  return stored === 'sandbox' ? 'sandbox' : 'direct';
 };
 
 interface ChatState {
@@ -88,9 +143,23 @@ interface ChatState {
 
   // Inspector UI state
   inspectorOpen: boolean;
-  inspectorTab: 'reasoning' | 'tools' | 'sources';
+  inspectorTab: InspectorTab;
   sidebarOpen: boolean;
   selectedMessageId: string | null;
+
+  // Execution visualization state
+  executionMode: ExecutionMode;
+  sandboxStatus: SandboxStatus;
+  terminalLines: Map<string, TerminalLine[]>;
+  executionSteps: Map<string, ExecutionStepUI[]>;
+  sandboxFiles: Map<string, SandboxFileEntry[]>;
+
+  // PPT pipeline state
+  pptPipeline: Map<string, PptPipelineState>;
+  isPptTask: Map<string, boolean>;
+
+  // Browser session state (Computer mode - real browser viewport)
+  browserSession: Map<string, BrowserSessionState>;
 
   // Actions - Messages
   setMessages: (sessionId: string, messages: Message[]) => void;
@@ -121,6 +190,7 @@ interface ChatState {
 
   // Actions - Files
   addFileArtifact: (sessionId: string, artifact: Artifact) => void;
+  setFileArtifacts: (sessionId: string, artifacts: Artifact[]) => void;
   clearFiles: (sessionId: string) => void;
 
   // Actions - Table blocks
@@ -131,9 +201,37 @@ interface ChatState {
 
   // Actions - Inspector
   setInspectorOpen: (open: boolean) => void;
-  setInspectorTab: (tab: 'reasoning' | 'tools' | 'sources') => void;
+  setInspectorTab: (tab: InspectorTab) => void;
   setSidebarOpen: (open: boolean) => void;
   setSelectedMessageId: (messageId: string | null) => void;
+
+  // Actions - Execution visualization
+  setExecutionMode: (mode: ExecutionMode) => void;
+  setSandboxStatus: (status: SandboxStatus) => void;
+  addTerminalLine: (sessionId: string, line: TerminalLine) => void;
+  addExecutionStep: (sessionId: string, step: ExecutionStepUI) => void;
+  updateExecutionStep: (
+    sessionId: string,
+    stepId: string,
+    updates: Partial<ExecutionStepUI>
+  ) => void;
+  addSandboxFile: (sessionId: string, file: SandboxFileEntry) => void;
+  clearExecutionState: (sessionId: string) => void;
+
+  // Actions - PPT pipeline
+  startPptPipeline: (sessionId: string, steps: PptPipelineStep[]) => void;
+  updatePptStep: (sessionId: string, step: PptStep, status: PptStepStatus) => void;
+  addBrowseActivity: (sessionId: string, activity: BrowseActivity) => void;
+  clearPptPipeline: (sessionId: string) => void;
+
+  // Actions - Browser session
+  setBrowserLaunched: (sessionId: string) => void;
+  setBrowserNavigated: (sessionId: string, url: string, title?: string) => void;
+  addBrowserAction: (sessionId: string, action: BrowserAction) => void;
+  setBrowserActionScreenshot: (sessionId: string, screenshotDataUrl: string) => void;
+  setBrowserClosed: (sessionId: string) => void;
+  setBrowserActionIndex: (sessionId: string, index: number) => void;
+  clearBrowserSession: (sessionId: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -152,6 +250,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   inspectorTab: 'tools',
   sidebarOpen: getInitialSidebarOpen(),
   selectedMessageId: null,
+  executionMode: getInitialExecutionMode(),
+  sandboxStatus: 'idle',
+  terminalLines: new Map(),
+  executionSteps: new Map(),
+  sandboxFiles: new Map(),
+  pptPipeline: new Map(),
+  isPptTask: new Map(),
+  browserSession: new Map(),
 
   // Set messages for a session
   setMessages: (sessionId: string, messages: Message[]) => {
@@ -401,6 +507,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
+  // Set file artifacts for a session (e.g. when hydrating from API on page load)
+  setFileArtifacts: (sessionId: string, artifacts: Artifact[]) => {
+    set((state) => {
+      const newFiles = new Map(state.files);
+      newFiles.set(sessionId, artifacts);
+      return { files: newFiles };
+    });
+  },
+
   // Clear file artifacts for a session
   clearFiles: (sessionId: string) => {
     set((state) => {
@@ -468,7 +583,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ inspectorOpen: open });
   },
 
-  setInspectorTab: (tab: 'reasoning' | 'tools' | 'sources') => {
+  setInspectorTab: (tab: InspectorTab) => {
     set({ inspectorTab: tab });
   },
 
@@ -479,5 +594,218 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setSelectedMessageId: (messageId: string | null) => {
     set({ selectedMessageId: messageId });
+  },
+
+  setExecutionMode: (mode: ExecutionMode) => {
+    localStorage.setItem(EXECUTION_MODE_STORAGE_KEY, mode);
+    set({ executionMode: mode });
+  },
+
+  setSandboxStatus: (status: SandboxStatus) => {
+    set({ sandboxStatus: status });
+  },
+
+  addTerminalLine: (sessionId: string, line: TerminalLine) => {
+    set((state) => {
+      const terminalLines = new Map(state.terminalLines);
+      const sessionLines = terminalLines.get(sessionId) || [];
+      terminalLines.set(sessionId, [...sessionLines, line]);
+      return { terminalLines };
+    });
+  },
+
+  addExecutionStep: (sessionId: string, step: ExecutionStepUI) => {
+    set((state) => {
+      const executionSteps = new Map(state.executionSteps);
+      const sessionSteps = executionSteps.get(sessionId) || [];
+      executionSteps.set(sessionId, [...sessionSteps, step]);
+      return { executionSteps };
+    });
+  },
+
+  updateExecutionStep: (sessionId: string, stepId: string, updates: Partial<ExecutionStepUI>) => {
+    set((state) => {
+      const executionSteps = new Map(state.executionSteps);
+      const sessionSteps = executionSteps.get(sessionId) || [];
+      executionSteps.set(
+        sessionId,
+        sessionSteps.map((step) => (step.stepId === stepId ? { ...step, ...updates } : step))
+      );
+      return { executionSteps };
+    });
+  },
+
+  addSandboxFile: (sessionId: string, file: SandboxFileEntry) => {
+    set((state) => {
+      const sandboxFiles = new Map(state.sandboxFiles);
+      const sessionFiles = sandboxFiles.get(sessionId) || [];
+      sandboxFiles.set(sessionId, [...sessionFiles, file]);
+      return { sandboxFiles };
+    });
+  },
+
+  clearExecutionState: (sessionId: string) => {
+    set((state) => {
+      const terminalLines = new Map(state.terminalLines);
+      const executionSteps = new Map(state.executionSteps);
+      const sandboxFiles = new Map(state.sandboxFiles);
+      terminalLines.delete(sessionId);
+      executionSteps.delete(sessionId);
+      sandboxFiles.delete(sessionId);
+      return { terminalLines, executionSteps, sandboxFiles };
+    });
+  },
+
+  startPptPipeline: (sessionId: string, steps: PptPipelineStep[]) => {
+    set((state) => {
+      const pptPipeline = new Map(state.pptPipeline);
+      const isPptTask = new Map(state.isPptTask);
+      pptPipeline.set(sessionId, {
+        steps,
+        currentStep: steps.find((step) => step.status === 'running')?.id,
+        browseActivity: [],
+      });
+      isPptTask.set(sessionId, true);
+      return { pptPipeline, isPptTask };
+    });
+  },
+
+  updatePptStep: (sessionId: string, step: PptStep, status: PptStepStatus) => {
+    set((state) => {
+      const pptPipeline = new Map(state.pptPipeline);
+      const pipeline = pptPipeline.get(sessionId);
+      if (!pipeline) return { pptPipeline };
+      const updatedSteps = pipeline.steps.map((item) =>
+        item.id === step ? { ...item, status } : item
+      );
+      pptPipeline.set(sessionId, {
+        ...pipeline,
+        steps: updatedSteps,
+        currentStep: status === 'running' ? step : pipeline.currentStep,
+      });
+      return { pptPipeline };
+    });
+  },
+
+  addBrowseActivity: (sessionId: string, activity: BrowseActivity) => {
+    set((state) => {
+      const pptPipeline = new Map(state.pptPipeline);
+      const pipeline = pptPipeline.get(sessionId);
+      if (!pipeline) return { pptPipeline };
+      pptPipeline.set(sessionId, {
+        ...pipeline,
+        browseActivity: [...pipeline.browseActivity, activity],
+      });
+      return { pptPipeline };
+    });
+  },
+
+  clearPptPipeline: (sessionId: string) => {
+    set((state) => {
+      const pptPipeline = new Map(state.pptPipeline);
+      const isPptTask = new Map(state.isPptTask);
+      pptPipeline.delete(sessionId);
+      isPptTask.delete(sessionId);
+      return { pptPipeline, isPptTask };
+    });
+  },
+
+  setBrowserLaunched: (sessionId: string) => {
+    set((state) => {
+      const browserSession = new Map(state.browserSession);
+      browserSession.set(sessionId, {
+        active: true,
+        currentUrl: '',
+        currentTitle: '',
+        status: 'active',
+        actions: [],
+        currentActionIndex: 0,
+      });
+      return { browserSession };
+    });
+  },
+
+  setBrowserNavigated: (sessionId: string, url: string, title?: string) => {
+    set((state) => {
+      const browserSession = new Map(state.browserSession);
+      const existing = browserSession.get(sessionId) ?? {
+        active: true,
+        currentUrl: '',
+        currentTitle: '',
+        status: 'active' as const,
+        actions: [],
+        currentActionIndex: 0,
+      };
+      browserSession.set(sessionId, {
+        ...existing,
+        currentUrl: url,
+        currentTitle: title ?? existing.currentTitle,
+      });
+      return { browserSession };
+    });
+  },
+
+  addBrowserAction: (sessionId: string, action: BrowserAction) => {
+    set((state) => {
+      const browserSession = new Map(state.browserSession);
+      const existing = browserSession.get(sessionId) ?? {
+        active: true,
+        currentUrl: '',
+        currentTitle: '',
+        status: 'active' as const,
+        actions: [],
+        currentActionIndex: 0,
+      };
+      const actions = [...existing.actions, action];
+      browserSession.set(sessionId, {
+        ...existing,
+        actions,
+        currentActionIndex: actions.length - 1,
+      });
+      return { browserSession };
+    });
+  },
+
+  setBrowserActionScreenshot: (sessionId: string, screenshotDataUrl: string) => {
+    set((state) => {
+      const browserSession = new Map(state.browserSession);
+      const existing = browserSession.get(sessionId);
+      if (!existing || existing.actions.length === 0) return state;
+      const actions = [...existing.actions];
+      const lastIdx = actions.length - 1;
+      actions[lastIdx] = { ...actions[lastIdx], screenshotDataUrl };
+      browserSession.set(sessionId, { ...existing, actions });
+      return { browserSession };
+    });
+  },
+
+  setBrowserClosed: (sessionId: string) => {
+    set((state) => {
+      const browserSession = new Map(state.browserSession);
+      const existing = browserSession.get(sessionId);
+      if (existing) {
+        browserSession.set(sessionId, { ...existing, active: false, status: 'closed' });
+      }
+      return { browserSession };
+    });
+  },
+
+  setBrowserActionIndex: (sessionId: string, index: number) => {
+    set((state) => {
+      const browserSession = new Map(state.browserSession);
+      const existing = browserSession.get(sessionId);
+      if (!existing) return state;
+      const clamped = Math.max(0, Math.min(index, existing.actions.length - 1));
+      browserSession.set(sessionId, { ...existing, currentActionIndex: clamped });
+      return { browserSession };
+    });
+  },
+
+  clearBrowserSession: (sessionId: string) => {
+    set((state) => {
+      const browserSession = new Map(state.browserSession);
+      browserSession.delete(sessionId);
+      return { browserSession };
+    });
   },
 }));

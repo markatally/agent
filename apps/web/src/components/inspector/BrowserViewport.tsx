@@ -1,0 +1,140 @@
+import { useEffect, useRef } from 'react';
+import { useBrowserStream } from '../../hooks/useBrowserStream';
+import { cn } from '../../lib/utils';
+
+const ASPECT_RATIO = 16 / 9;
+
+interface BrowserViewportProps {
+  sessionId: string | null;
+  enabled: boolean;
+  snapshotUrl?: string | null;
+  /** When false, show stored snapshot instead of live WebSocket frame (e.g. when scrubbing history) */
+  showLive?: boolean;
+  className?: string;
+}
+
+/**
+ * Renders live browser screencast frames on a canvas.
+ * Connects to WebSocket and draws JPEG frames as they arrive.
+ */
+export function BrowserViewport({ sessionId, enabled, snapshotUrl, showLive = true, className }: BrowserViewportProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { frameDataUrl, status, error } = useBrowserStream(sessionId, enabled);
+  const displayLive = showLive !== false && !!frameDataUrl;
+
+  useEffect(() => {
+    if (!frameDataUrl || !canvasRef.current) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const dpr = window.devicePixelRatio ?? 1;
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      ctx.scale(dpr, dpr);
+
+      const scale = Math.min(w / img.width, h / img.height);
+      const drawW = img.width * scale;
+      const drawH = img.height * scale;
+      const x = (w - drawW) / 2;
+      const y = (h - drawH) / 2;
+
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, x, y, drawW, drawH);
+    };
+    img.src = frameDataUrl;
+  }, [frameDataUrl]);
+
+  if (!enabled && !snapshotUrl) {
+    return (
+      <div
+        className={cn(
+          'flex items-center justify-center rounded-lg border bg-muted/20 text-sm text-muted-foreground',
+          className
+        )}
+        style={{ aspectRatio: ASPECT_RATIO }}
+      >
+        Browser view is off
+      </div>
+    );
+  }
+
+  if (enabled && status === 'connecting') {
+    return (
+      <div
+        className={cn(
+          'flex items-center justify-center rounded-lg border bg-muted/20 text-sm text-muted-foreground',
+          className
+        )}
+        style={{ aspectRatio: ASPECT_RATIO }}
+      >
+        Connecting...
+      </div>
+    );
+  }
+
+  if (status === 'error' || error) {
+    return (
+      <div
+        className={cn(
+          'flex items-center justify-center rounded-lg border border-destructive/30 bg-destructive/5 text-sm text-destructive',
+          className
+        )}
+        style={{ aspectRatio: ASPECT_RATIO }}
+      >
+        {error ?? 'Connection failed'}
+      </div>
+    );
+  }
+
+  if (status === 'closed' && !frameDataUrl && !snapshotUrl) {
+    return (
+      <div
+        className={cn(
+          'flex items-center justify-center rounded-lg border bg-muted/20 text-sm text-muted-foreground',
+          className
+        )}
+        style={{ aspectRatio: ASPECT_RATIO }}
+      >
+        No browser session
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn('overflow-hidden rounded-lg border bg-black', className)}
+      style={{ aspectRatio: ASPECT_RATIO }}
+    >
+      {displayLive ? (
+        <canvas
+          ref={canvasRef}
+          className="h-full w-full object-contain"
+          style={{ width: '100%', height: '100%' }}
+        />
+      ) : snapshotUrl ? (
+        <img
+          src={snapshotUrl}
+          alt="Browser screenshot"
+          className="h-full w-full object-contain"
+        />
+      ) : frameDataUrl ? (
+        <canvas
+          ref={canvasRef}
+          className="h-full w-full object-contain"
+          style={{ width: '100%', height: '100%' }}
+        />
+      ) : null}
+    </div>
+  );
+}

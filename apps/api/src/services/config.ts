@@ -13,6 +13,7 @@ export interface LLMConfig {
   provider: string;
   baseUrl: string;
   model: string;
+  /** Max tokens for completion; use a high value (e.g. 131072) so large tool-call payloads (e.g. ppt_generator) are not truncated. */
   maxTokens: number;
   temperature: number;
   timeout: number;
@@ -71,10 +72,39 @@ export interface LoggingConfig {
   retentionDays: number;
 }
 
+export interface BrowserConfig {
+  enabled: boolean;
+  maxConcurrentSessions: number;
+  viewport: { width: number; height: number };
+  idleTimeoutMs: number;
+  screencast?: {
+    format: 'jpeg' | 'png';
+    quality?: number;
+    maxWidth?: number;
+    maxHeight?: number;
+    everyNthFrame?: number;
+  };
+}
+
+export interface ExecutionConfig {
+  sandboxVisualization: {
+    enabled: boolean;
+    defaultMode: 'direct' | 'sandbox';
+    maxConcurrentSandboxes: number;
+    terminalMaxLines: number;
+    maxFileSize: string;
+  };
+  pptPipeline?: {
+    enabled: boolean;
+  };
+}
+
 export interface AppConfig {
   llm: LLMConfig;
   rateLimits: RateLimitsConfig;
   sandbox: SandboxConfig;
+  browser?: BrowserConfig;
+  execution: ExecutionConfig;
   session: SessionConfig;
   tools: ToolsConfig;
   security: SecurityConfig;

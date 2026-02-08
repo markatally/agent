@@ -48,10 +48,74 @@ export type StreamEventType =
   | 'message.start'
   | 'message.delta'
   | 'message.complete'
+  | 'thinking.start'
+  | 'thinking.delta'
+  | 'thinking.complete'
   | 'tool.start'
+  | 'tool.progress'
   | 'tool.complete'
   | 'tool.error'
+  | 'reasoning.step'
+  | 'inspector.focus'
+  | 'sandbox.provisioning'
+  | 'sandbox.ready'
+  | 'sandbox.teardown'
+  | 'sandbox.fallback'
+  | 'execution.step.start'
+  | 'execution.step.update'
+  | 'execution.step.end'
+  | 'terminal.command'
+  | 'terminal.stdout'
+  | 'terminal.stderr'
+  | 'fs.file.created'
+  | 'fs.file.modified'
+  | 'fs.tree.snapshot'
+  | 'file.created'
+  | 'table.start'
+  | 'table.complete'
+  | 'ppt.pipeline.start'
+  | 'ppt.pipeline.step'
+  | 'browse.activity'
+  | 'browser.launched'
+  | 'browser.navigated'
+  | 'browser.action'
+  | 'browser.screenshot'
+  | 'browser.closed'
   | 'error';
+
+export type PptStep =
+  | 'research'
+  | 'browsing'
+  | 'reading'
+  | 'synthesizing'
+  | 'generating'
+  | 'finalizing';
+
+export type PptStepStatus = 'pending' | 'running' | 'completed';
+
+export interface PptPipelineStep {
+  id: PptStep;
+  label: string;
+  status: PptStepStatus;
+}
+
+export interface BrowseActivity {
+  action: 'search' | 'visit' | 'read';
+  url?: string;
+  title?: string;
+  query?: string;
+  timestamp: number;
+}
+
+/** Browser session state for Computer mode (real browser viewport) */
+export interface BrowserSessionState {
+  active: boolean;
+  currentUrl: string;
+  currentTitle: string;
+  status: 'idle' | 'launching' | 'active' | 'closed';
+  actions: BrowserAction[];
+  currentActionIndex: number;
+}
 
 /**
  * SSE Stream event

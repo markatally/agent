@@ -34,6 +34,31 @@
     "diskSpace": "1GB",
     "networkAccess": false
   },
+  "browser": {
+    "enabled": true,
+    "maxConcurrentSessions": 3,
+    "viewport": { "width": 1280, "height": 720 },
+    "idleTimeoutMs": 300000,
+    "screencast": {
+      "format": "jpeg",
+      "quality": 60,
+      "maxWidth": 1280,
+      "maxHeight": 720,
+      "everyNthFrame": 1
+    }
+  },
+  "execution": {
+    "sandboxVisualization": {
+      "enabled": false,
+      "defaultMode": "direct",
+      "maxConcurrentSandboxes": 5,
+      "terminalMaxLines": 10000,
+      "maxFileSize": "50MB"
+    },
+    "pptPipeline": {
+      "enabled": true
+    }
+  },
   "mcp": {
     "enabled": false,
     "servers": [
@@ -76,7 +101,14 @@
       "web_scraper",
       "code_analyzer",
       "test_runner",
-      "git_operations"
+      "git_operations",
+      "browser_navigate",
+      "browser_click",
+      "browser_type",
+      "browser_scroll",
+      "browser_screenshot",
+      "browser_wait",
+      "browser_extract"
     ],
     "requireApproval": [
       "bash_executor",

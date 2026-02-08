@@ -2,6 +2,8 @@ import { useState, useRef, KeyboardEvent } from 'react';
 import { ArrowUp, Plus, Square } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
+import { Switch } from '../ui/switch';
+import { useChatStore } from '../../stores/chatStore';
 
 interface ChatInputProps {
   onSend: (content: string) => void;
@@ -15,6 +17,8 @@ export function ChatInput({ onSend, disabled, sendDisabled, onStop, onOpenSkills
   const [message, setMessage] = useState('');
   const [isComposing, setIsComposing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const executionMode = useChatStore((state) => state.executionMode);
+  const setExecutionMode = useChatStore((state) => state.setExecutionMode);
 
   const canSend = !disabled && !sendDisabled && message.trim();
 
@@ -63,11 +67,12 @@ export function ChatInput({ onSend, disabled, sendDisabled, onStop, onOpenSkills
   return (
     <div className="bg-background/90 pb-2 backdrop-blur">
       <div className="mx-auto w-full max-w-3xl px-4 pt-4">
-        <div className="flex items-center gap-2 rounded-2xl border border-input/50 bg-background px-4 py-3 transition-colors focus-within:border-input">
+        <div className="flex items-center gap-2 rounded-3xl border border-muted/40 bg-white px-4 py-3 shadow-sm transition-colors focus-within:border-muted/60 dark:bg-neutral-900">
           <button
             type="button"
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center self-start pt-0.5 text-muted-foreground hover:text-foreground"
             aria-label="Attach"
+            data-testid="settings-button"
             onClick={onOpenSkills}
           >
             <Plus className="h-4 w-4" />
@@ -81,8 +86,17 @@ export function ChatInput({ onSend, disabled, sendDisabled, onStop, onOpenSkills
             onCompositionEnd={handleCompositionEnd}
             placeholder="Ask anything"
             disabled={disabled}
-            className="min-h-[52px] max-h-48 flex-1 resize-none border-0 bg-transparent p-1 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+            data-testid="chat-input"
+            className="min-h-[52px] max-h-48 flex-1 resize-none border-0 bg-transparent p-1 text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           />
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={executionMode === 'sandbox'}
+              onCheckedChange={(checked) => setExecutionMode(checked ? 'sandbox' : 'direct')}
+              aria-label="Toggle computer mode"
+            />
+            <span className="text-xs text-muted-foreground">Computer</span>
+          </div>
           {sendDisabled && onStop ? (
             <Button
               onClick={onStop}

@@ -19,7 +19,7 @@ const markdownComponents: Components = {
     const { children, className, node, ...rest } = props;
     const match = /language-(\w+)/.exec(className || '');
     const codeString = String(children).replace(/\n$/, '');
-    const isBlock = /\n/.test(codeString) || (node as { position?: unknown })?.position;
+    const isBlock = /\n/.test(codeString);
 
     if (match) {
       return (
@@ -40,7 +40,10 @@ const markdownComponents: Components = {
     }
 
     return (
-      <code className={className} {...rest}>
+      <code
+        className={cn('rounded bg-muted px-1.5 py-0.5 text-sm font-mono', className)}
+        {...rest}
+      >
         {children}
       </code>
     );
@@ -197,7 +200,7 @@ export function ContentBlock({ content, isStreaming }: ContentBlockProps) {
   const hasMarkdownTables = parsedContent?.hasTables ?? false;
 
   return (
-    <div className="prose prose-neutral dark:prose-invert max-w-none">
+    <div className="prose prose-neutral dark:prose-invert max-w-none" data-testid="assistant-message">
       {hasExplicitTableBlocks ? (
         explicitTableSegments.map((segment, index) =>
           segment.type === 'table' ? (

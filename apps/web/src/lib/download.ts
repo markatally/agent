@@ -1,14 +1,14 @@
 /**
  * Shared download utility for file downloads
- * Uses authenticated downloads to create a short-lived download URL
+ * Uses the authenticated download endpoint with Bearer token
  */
 
 import { filesApi } from './api';
 
 /**
- * Trigger a file download using a signed URL
+ * Trigger a file download using the authenticated API
  * The browser will download the file to the default download folder
- * 
+ *
  * @param sessionId - The session ID
  * @param fileId - The file ID
  * @param filename - The filename to save as
@@ -19,21 +19,18 @@ export async function triggerDownload(
   filename: string
 ): Promise<void> {
   try {
-    // Fetch a short-lived download URL using authenticated API
-    const downloadUrl = await filesApi.getDownloadUrl(sessionId, fileId);
+    const blob = await filesApi.download(sessionId, fileId);
+    const blobUrl = URL.createObjectURL(blob);
 
-    // Create temporary anchor element
     const link = document.createElement('a');
-    link.href = downloadUrl;
+    link.href = blobUrl;
     link.download = filename;
     link.style.display = 'none';
-    
-    // Trigger download
+
     document.body.appendChild(link);
     link.click();
-    
-    // Clean up
     document.body.removeChild(link);
+    URL.revokeObjectURL(blobUrl);
   } catch (error) {
     console.error('Download failed:', error);
     throw error;

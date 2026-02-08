@@ -7,6 +7,7 @@ import { Button } from '../ui/button';
 import { ToolCallCard } from './ToolCallCard';
 import { ReasoningTrace } from './ReasoningTrace';
 import { SourcesList } from './SourcesList';
+import { ComputerPanel } from './ComputerPanel';
 
 const MIN_INSPECTOR_WIDTH = 280;
 const MAX_INSPECTOR_WIDTH = 560;
@@ -24,6 +25,22 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
   const setInspectorTab = useChatStore((state) => state.setInspectorTab);
   const toolCalls = useChatStore((state) => state.toolCalls);
   const selectedMessageId = useChatStore((state) => state.selectedMessageId);
+  const executionMode = useChatStore((state) => state.executionMode);
+  const terminalLines = useChatStore((state) =>
+    sessionId ? state.terminalLines.get(sessionId) || [] : []
+  );
+  const executionSteps = useChatStore((state) =>
+    sessionId ? state.executionSteps.get(sessionId) || [] : []
+  );
+  const sandboxFiles = useChatStore((state) =>
+    sessionId ? state.sandboxFiles.get(sessionId) || [] : []
+  );
+  const isPptTask = useChatStore((state) =>
+    sessionId ? state.isPptTask.get(sessionId) || false : false
+  );
+  const browserSessionActive = useChatStore((state) =>
+    sessionId ? (state.browserSession.get(sessionId)?.active ?? false) : false
+  );
   const [width, setWidth] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored
@@ -86,6 +103,15 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
         .reverse()
     : [];
 
+  const showComputerTab =
+    !!sessionId &&
+    (executionMode === 'sandbox' ||
+      terminalLines.length > 0 ||
+      executionSteps.length > 0 ||
+      sandboxFiles.length > 0 ||
+      isPptTask ||
+      browserSessionActive);
+
   return (
     <aside
       style={{ width: open ? width : 0 }}
@@ -115,7 +141,9 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
             {sessionId ? (
               <Tabs
                 value={inspectorTab}
-                onValueChange={(value) => setInspectorTab(value as 'reasoning' | 'tools' | 'sources')}
+                onValueChange={(value) =>
+                  setInspectorTab(value as 'reasoning' | 'tools' | 'sources' | 'computer')
+                }
                 className="flex h-full flex-col"
               >
                 <div className="shrink-0 border-b px-3 pb-2 pt-3">
@@ -123,6 +151,9 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
                     <TabsTrigger value="tools" className="flex-1">Tools</TabsTrigger>
                     <TabsTrigger value="sources" className="flex-1">Sources</TabsTrigger>
                     <TabsTrigger value="reasoning" className="flex-1">Reasoning</TabsTrigger>
+                    {showComputerTab ? (
+                      <TabsTrigger value="computer" className="flex-1">Computer</TabsTrigger>
+                    ) : null}
                   </TabsList>
                 </div>
 
@@ -158,6 +189,10 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
 
                   <TabsContent value="reasoning" className="min-w-0">
                     <ReasoningTrace sessionId={sessionId} selectedMessageId={selectedMessageId} />
+                  </TabsContent>
+
+                  <TabsContent value="computer" className="min-w-0">
+                    <ComputerPanel sessionId={sessionId} />
                   </TabsContent>
                 </div>
               </Tabs>

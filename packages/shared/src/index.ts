@@ -74,6 +74,10 @@ export interface ExecutionLog {
   timestamp: Date;
 }
 
+export type ExecutionMode = 'direct' | 'sandbox';
+
+export type InspectorTab = 'computer' | 'tools' | 'sources' | 'reasoning';
+
 // ============ Context Types ============
 
 export interface Context {
@@ -457,6 +461,7 @@ export type StreamEventType =
   | 'tool.progress'
   | 'tool.complete'
   | 'tool.error'
+  | 'inspector.focus'
   | 'plan.created'
   | 'plan.step.start'
   | 'plan.step.complete'
@@ -464,8 +469,26 @@ export type StreamEventType =
   | 'file.created'
   | 'file.modified'
   | 'file.deleted'
+  | 'sandbox.provisioning'
+  | 'sandbox.ready'
+  | 'sandbox.teardown'
+  | 'sandbox.fallback'
+  | 'execution.step.start'
+  | 'execution.step.update'
+  | 'execution.step.end'
+  | 'terminal.command'
+  | 'terminal.stdout'
+  | 'terminal.stderr'
+  | 'fs.file.created'
+  | 'fs.file.modified'
+  | 'fs.tree.snapshot'
   | 'table.start'
   | 'table.complete'
+  | 'browser.launched'
+  | 'browser.navigated'
+  | 'browser.action'
+  | 'browser.screenshot'
+  | 'browser.closed'
   | 'error'
   | 'session.end';
 
@@ -474,6 +497,11 @@ export interface StreamEvent {
   sessionId: string;
   timestamp: number;
   data: any;
+}
+
+export interface InspectorFocusEventData {
+  tab: InspectorTab;
+  reason?: string;
 }
 
 /**
@@ -496,6 +524,20 @@ export interface TableCompleteEventData {
   tableId: string;
   /** Complete Table IR data */
   table: TableIR;
+}
+
+/**
+ * Browser action type for timeline (Computer mode)
+ */
+export interface BrowserAction {
+  id: string;
+  type: 'navigate' | 'click' | 'type' | 'scroll' | 'wait' | 'extract' | 'screenshot';
+  url?: string;
+  selector?: string;
+  text?: string;
+  timestamp: number;
+  frameIndex?: number;
+  screenshotDataUrl?: string;
 }
 
 // ============ External Skill Contract ============

@@ -7,6 +7,7 @@ import { useChatStore } from '../stores/chatStore';
  */
 export function useSessionMessages(sessionId: string | undefined) {
   const setMessages = useChatStore((state) => state.setMessages);
+  const setFileArtifacts = useChatStore((state) => state.setFileArtifacts);
   const startToolCall = useChatStore((state) => state.startToolCall);
   const updateToolCall = useChatStore((state) => state.updateToolCall);
   const addReasoningStep = useChatStore((state) => state.addReasoningStep);
@@ -18,8 +19,9 @@ export function useSessionMessages(sessionId: string | undefined) {
       if (!sessionId) throw new Error('Session ID is required');
       const session = await apiClient.sessions.get(sessionId);
 
-      // Update chat store with messages
-      setMessages(sessionId, session.messages || []);
+      // Update chat store with messages (ensure each message has current sessionId for file lookups)
+      const messages = (session.messages || []).map((m) => ({ ...m, sessionId }));
+      setMessages(sessionId, messages);
 
       // Hydrate persisted tool calls into the store (for refresh/load)
       const existingToolCalls = useChatStore.getState().toolCalls;
@@ -50,7 +52,7 @@ export function useSessionMessages(sessionId: string | undefined) {
 
       // Hydrate reasoning steps from message metadata
       // Use a message-specific key format: `msg-{messageId}`
-      for (const message of session.messages || []) {
+      for (const message of messages) {
         if (message.role === 'assistant' && message.metadata?.reasoningSteps) {
           const reasoningSteps = message.metadata.reasoningSteps as Array<{
             stepId: string;
@@ -84,7 +86,23 @@ export function useSessionMessages(sessionId: string | undefined) {
         }
       }
 
-      return session.messages || [];
+      // Hydrate file artifacts from API (for refresh/load - files persist in DB)
+      try {
+        const { files } = await apiClient.files.list(sessionId);
+        const artifacts = files.map((f) => ({
+          type: 'file' as const,
+          name: f.filename,
+          fileId: f.id,
+          size: f.sizeBytes,
+          mimeType: f.mimeType,
+          content: '',
+        }));
+        setFileArtifacts(sessionId, artifacts);
+      } catch {
+        // Ignore - session may have no files or list may fail
+      }
+
+      return messages;
     },
     enabled: !!sessionId,
     staleTime: 30000, // 30 seconds - SSE provides real-time updates, no need for aggressive polling

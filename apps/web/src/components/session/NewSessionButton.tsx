@@ -22,6 +22,7 @@ export function NewSessionButton() {
       className="w-full"
       onClick={handleCreateSession}
       disabled={createSession.isPending}
+      data-testid="new-chat-button"
     >
       <Plus className="mr-2 h-4 w-4" />
       {createSession.isPending ? 'Creating...' : 'New Session'}

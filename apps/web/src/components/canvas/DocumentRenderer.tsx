@@ -61,9 +61,24 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
     [findNextAssistantMessageId]
   );
 
+  const lastUserMessageId = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return messages[i].id;
+    }
+    return null;
+  })();
+
   const handleUserMessageClick = useCallback(
     (userMessageId: string) => {
       const assistantMessageId = findNextAssistantMessageId(userMessageId);
+
+      // Current ongoing prompt (last user message with no assistant yet): click = return to live view
+      if (!assistantMessageId && userMessageId === lastUserMessageId) {
+        setSelectedMessageId(null);
+        setInspectorOpen(true);
+        return;
+      }
+
       if (!assistantMessageId) return;
 
       if (selectedMessageId === assistantMessageId) {
@@ -74,16 +89,18 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
         setInspectorOpen(true);
       }
     },
-    [selectedMessageId, setSelectedMessageId, setInspectorOpen, findNextAssistantMessageId]
+    [selectedMessageId, setSelectedMessageId, setInspectorOpen, findNextAssistantMessageId, lastUserMessageId]
   );
 
-  // Check if a user message is currently selected (its assistant response is selected)
+  // Check if a user message is currently selected (its assistant response is selected), or is the live ongoing prompt
   const isUserMessageSelected = useCallback(
     (userMessageId: string) => {
       const assistantMessageId = findNextAssistantMessageId(userMessageId);
-      return assistantMessageId === selectedMessageId;
+      if (assistantMessageId) return assistantMessageId === selectedMessageId;
+      // Last user message with no assistant yet: "selected" when we're in live view (no message selected)
+      return userMessageId === lastUserMessageId && selectedMessageId === null;
     },
-    [selectedMessageId, findNextAssistantMessageId]
+    [selectedMessageId, findNextAssistantMessageId, lastUserMessageId]
   );
 
   const errorType = error instanceof ApiError ? {
@@ -155,13 +172,15 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
 
           if (!message.content) return null;
 
-          const isClickable = userMessageHasAssistant(message.id);
+          const isClickable =
+            userMessageHasAssistant(message.id) ||
+            (message.id === lastUserMessageId && (isStreamingThisSession || isThinkingThisSession));
           const messageNode = (
             <div
               key={message.id}
               onClick={() => handleUserMessageClick(message.id)}
               className={cn(
-                'relative rounded-xl transition-all duration-150',
+                'relative w-fit max-w-[80%] self-end rounded-2xl transition-all duration-150',
                 isClickable &&
                   'cursor-pointer hover:shadow-[0_2px_16px_rgba(0,0,0,0.10)] dark:hover:shadow-[0_2px_16px_rgba(0,0,0,0.24)]',
                 isUserMessageSelected(message.id) &&
@@ -179,22 +198,14 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
           return (
             <Tooltip key={message.id}>
               <TooltipTrigger asChild>{messageNode}</TooltipTrigger>
-              <TooltipContent>Click to inspect</TooltipContent>
+              <TooltipContent>
+                {message.id === lastUserMessageId && !userMessageHasAssistant(message.id)
+                  ? 'Click to view live progress'
+                  : 'Click to inspect'}
+              </TooltipContent>
             </Tooltip>
           );
         })}
-
-        {files.length > 0 ? (
-          <div className="space-y-3">
-            {files.map((artifact) => (
-              <ArtifactCard
-                key={`${artifact.name}-${artifact.fileId || artifact.content}`}
-                artifact={artifact}
-                sessionId={sessionId}
-              />
-            ))}
-          </div>
-        ) : null}
 
         {showStreamingContent ? (
           <div
@@ -210,6 +221,18 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
         {isThinkingThisSession && !showStreamingContent ? (
           <div className="text-muted-foreground">
             <ThinkingIndicator />
+          </div>
+        ) : null}
+
+        {files.length > 0 ? (
+          <div className="space-y-3">
+            {files.map((artifact) => (
+              <ArtifactCard
+                key={`${artifact.name}-${artifact.fileId || artifact.content}`}
+                artifact={artifact}
+                sessionId={sessionId}
+              />
+            ))}
           </div>
         ) : null}
 

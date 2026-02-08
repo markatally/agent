@@ -3,12 +3,14 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { serve } from '@hono/node-server';
+import { createNodeWebSocket } from '@hono/node-ws';
 
 // Route imports
 import { authRoutes } from './routes/auth';
 import { sessionRoutes } from './routes/sessions';
 import { messageRoutes } from './routes/messages';
 import { streamRoutes } from './routes/stream';
+import { createBrowserStreamRoutes } from './routes/browser-stream';
 import { fileRoutes } from './routes/files';
 import { skillRoutes } from './routes/skills';
 import { externalSkillRoutes } from './routes/external-skills';
@@ -16,6 +18,7 @@ import { userSkillRoutes } from './routes/user-skills';
 import { publicDownloadRoutes } from './routes/public-download';
 
 const app = new Hono();
+const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
 // Middleware
 app.use('*', logger());
@@ -42,6 +45,7 @@ app.route('/api/auth', authRoutes);
 app.route('/api/sessions', sessionRoutes);
 app.route('/api', messageRoutes); // Messages are nested under sessions
 app.route('/api', streamRoutes); // SSE streaming endpoints
+app.route('/api', createBrowserStreamRoutes(upgradeWebSocket)); // Browser screencast WebSocket
 app.route('/api', fileRoutes); // File upload/download endpoints
 app.route('/api/skills', skillRoutes); // Skill listing and invocation
 app.route('/api/external-skills', externalSkillRoutes);
@@ -75,10 +79,12 @@ if (isMainModule) {
 
   console.log(`Starting server on port ${port}...`);
 
-  serve({
+  const server = serve({
     fetch: app.fetch,
     port,
   });
+
+  injectWebSocket(server);
 
   console.log(`Server running at http://localhost:${port}`);
 }

@@ -23,6 +23,7 @@ export class TaskManager {
   private toolCallHistory: Map<string, ToolCallHistory[]> = new Map();
   // Treat search tools as high-cost - allow at most ONE call per task
   private readonly MAX_SEARCH_CALLS = 1;
+  private readonly MAX_CONSECUTIVE_FAILURES = 2;
 
   /**
    * Initialize a task for a session
@@ -146,7 +147,8 @@ export class TaskManager {
     sessionId: string,
     toolName: string,
     parameters: Record<string, any>,
-    result?: any
+    result?: any,
+    success: boolean = true
   ): void {
     const history = this.toolCallHistory.get(sessionId) || [];
     history.push({
@@ -154,6 +156,7 @@ export class TaskManager {
       parameters,
       timestamp: new Date(),
       result,
+      success,
     });
     this.toolCallHistory.set(sessionId, history);
 
@@ -247,6 +250,23 @@ export class TaskManager {
           reason: `Search already completed for this query. Synthesize your answer from the results already retrieved. Do not explain tool limitations to the user.`,
         };
       }
+    }
+
+    const recentCalls = history.filter((call) => call.toolName === toolName);
+    let consecutiveFailures = 0;
+    for (let i = recentCalls.length - 1; i >= 0; i--) {
+      if (!recentCalls[i].success) {
+        consecutiveFailures += 1;
+      } else {
+        break;
+      }
+    }
+
+    if (consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+      return {
+        allowed: false,
+        reason: `Tool "${toolName}" has failed ${consecutiveFailures} times in a row. Do not retry. Instead, inform the user that the operation could not be completed and suggest they try again with different input.`,
+      };
     }
 
     // Check if task is already complete

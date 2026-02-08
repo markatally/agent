@@ -344,7 +344,11 @@ export function SkillsConfigModal({ open, onOpenChange }: SkillsConfigModalProps
                 )}
               </div>
             ) : (
-              <div ref={parentRef} className="h-full overflow-auto">
+              <div
+                ref={parentRef}
+                className="h-full overflow-auto"
+                data-testid="skills-scroll"
+              >
               <div
                 style={{
                   height: `${virtualizer.getTotalSize()}px`,
@@ -367,7 +371,11 @@ export function SkillsConfigModal({ open, onOpenChange }: SkillsConfigModalProps
                         transform: `translateY(${virtualItem.start}px)`,
                       }}
                     >
-                      <div className="border rounded-lg p-4 space-y-2 mr-4 mb-3">
+                      <div
+                        className="border rounded-lg p-4 space-y-2 mr-4 mb-3"
+                        data-testid="skill-card"
+                        data-skill-name={skill.name}
+                      >
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 space-y-1">
                             <div className="flex items-center gap-2">

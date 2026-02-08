@@ -14,6 +14,37 @@ export type TaskPhase = 'planning' | 'executing' | 'reflecting' | 'completed' | 
 export type StepType = 'web_search' | 'paper_selection' | 'summarization' | 'ppt_generation' | 'file_output';
 
 /**
+ * PPT pipeline steps for Manus-style timeline
+ */
+export type PptStep =
+  | 'research'
+  | 'browsing'
+  | 'reading'
+  | 'synthesizing'
+  | 'generating'
+  | 'finalizing';
+
+export type PptStepStatus = 'pending' | 'running' | 'completed';
+
+export interface PptPipelineStep {
+  id: PptStep;
+  label: string;
+  status: PptStepStatus;
+}
+
+export interface PptPipelineState {
+  steps: PptPipelineStep[];
+  currentStep: PptStep;
+  browseActivity: Array<{
+    url?: string;
+    title?: string;
+    action: 'search' | 'visit' | 'read';
+    query?: string;
+    timestamp: number;
+  }>;
+}
+
+/**
  * Execution step
  */
 export interface ExecutionStep {
@@ -78,4 +109,5 @@ export interface ToolCallHistory {
   parameters: Record<string, any>;
   timestamp: Date;
   result?: any;
+  success: boolean;
 }

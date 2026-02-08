@@ -2,9 +2,10 @@
 
 # Mark Agent - One-click Service Startup
 # Usage: ./start.sh [options]
-#   --build-sandbox  Build the Docker sandbox image
-#   --reset-db       Reset and re-migrate the database
-#   --help           Show this help message
+#   --build-sandbox   Build the Docker sandbox image
+#   --install-browser Install Playwright Chromium (for Computer/browser mode)
+#   --reset-db        Reset and re-migrate the database
+#   --help            Show this help message
 
 set -e
 
@@ -23,12 +24,17 @@ cd "$PROJECT_ROOT" || exit 1
 
 # Parse arguments
 BUILD_SANDBOX=false
+INSTALL_BROWSER=false
 RESET_DB=false
 
 for arg in "$@"; do
   case $arg in
     --build-sandbox)
       BUILD_SANDBOX=true
+      shift
+      ;;
+    --install-browser)
+      INSTALL_BROWSER=true
       shift
       ;;
     --reset-db)
@@ -41,15 +47,19 @@ for arg in "$@"; do
       echo "Usage: ./start.sh [options]"
       echo ""
       echo "Options:"
-      echo "  --build-sandbox  Build the Docker sandbox image"
-      echo "  --reset-db       Reset and re-migrate the database"
-      echo "  --help           Show this help message"
+      echo "  --build-sandbox   Build the Docker sandbox image"
+      echo "  --install-browser Install Playwright Chromium (for Computer/browser mode)"
+      echo "  --reset-db        Reset and re-migrate the database"
+      echo "  --help            Show this help message"
       echo ""
       echo "Services started:"
       echo "  - PostgreSQL (localhost:5432)"
       echo "  - Redis (localhost:6379)"
       echo "  - Backend API (localhost:4000)"
       echo "  - Frontend (localhost:3000)"
+      echo ""
+      echo "Optional: Enable browser.enabled in config/default.json and use"
+      echo "  --install-browser to install Chromium for real-browser Computer mode."
       exit 0
       ;;
   esac
@@ -215,6 +225,15 @@ if $BUILD_SANDBOX; then
   echo -e "${GREEN}  ✓ Sandbox image built${NC}"
 else
   echo -e "${YELLOW}[6/7] Skipping sandbox build (use --build-sandbox to build)${NC}"
+fi
+
+# Step 6b: Install Playwright Chromium (optional, for Computer/browser mode)
+if $INSTALL_BROWSER; then
+  echo -e "${YELLOW}[6b] Installing Playwright Chromium for browser mode...${NC}"
+  cd apps/api
+  bunx playwright install chromium
+  cd "$PROJECT_ROOT"
+  echo -e "${GREEN}  ✓ Playwright Chromium installed${NC}"
 fi
 
 # Step 7: Start application services

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Bot, User } from 'lucide-react';
+import { Bot, CheckCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CodeBlock } from '../ui/code-block';
@@ -10,6 +10,8 @@ import type { Components } from 'react-markdown';
 import { useChatStore } from '../../stores/chatStore';
 import { InteractiveTable } from './InteractiveTable';
 import { parseContentWithTables } from '../../lib/tableParser';
+import { Button } from '../ui/button';
+import { triggerDownload } from '../../lib/download';
 
 interface MessageItemProps {
   message: Message;
@@ -22,6 +24,13 @@ interface MessageItemProps {
  */
 const TABLE_BLOCK_PATTERN = /<!--TABLE:([a-zA-Z0-9_-]+)-->/g;
 
+const formatFileSize = (bytes?: number): string => {
+  if (!bytes) return '-';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 /**
  * Custom markdown components for ReactMarkdown
  * Includes styled table components for clean table rendering
@@ -32,7 +41,7 @@ const markdownComponents: Components = {
     const { children, className, node, ...rest } = props;
     const match = /language-(\w+)/.exec(className || '');
     const codeString = String(children).replace(/\n$/, '');
-    const isBlock = /\n/.test(codeString) || (node as { position?: unknown })?.position;
+    const isBlock = /\n/.test(codeString);
 
     if (match) {
       return (
@@ -53,7 +62,10 @@ const markdownComponents: Components = {
     }
 
     return (
-      <code className={className} {...rest}>
+      <code
+        className={cn('rounded bg-muted px-1.5 py-0.5 text-sm font-mono', className)}
+        {...rest}
+      >
         {children}
       </code>
     );
@@ -228,6 +240,17 @@ function parseMessageContent(content: string): Array<{ type: 'text' | 'table'; v
 
 export function MessageItem({ message, isStreaming }: MessageItemProps) {
   const isUser = message.role === 'user';
+  const sessionMessages = useChatStore((state) => state.messages.get(message.sessionId) || []);
+  const fileArtifacts = useChatStore((state) => state.files.get(message.sessionId) || []);
+  const lastAssistantMessageId = useMemo(() => {
+    const lastAssistant = [...sessionMessages].reverse().find((msg) => msg.role === 'assistant');
+    return lastAssistant?.id;
+  }, [sessionMessages]);
+  const pptArtifacts = fileArtifacts.filter(
+    (artifact) =>
+      artifact.name?.toLowerCase().endsWith('.pptx') ||
+      artifact.mimeType?.includes('presentation')
+  );
 
   // First check for explicit TABLE markers (from backend Table IR events)
   const explicitTableSegments = parseMessageContent(message.content);
@@ -244,34 +267,37 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
 
   const hasMarkdownTables = parsedContent?.hasTables ?? false;
 
+  if (isUser) {
+    return (
+      <div className="flex justify-end px-4 py-2">
+        <div className="flex w-fit max-w-[80%] flex-col items-end gap-1">
+          <div className="rounded-2xl bg-muted/60 px-4 py-2.5 text-sm text-black dark:text-white">
+            {message.content}
+          </div>
+          <div className="flex items-center justify-end gap-1 pr-1">
+            <span className="text-xs text-muted-foreground">
+              {formatDistanceToNow(new Date(message.createdAt), {
+                addSuffix: true,
+              })}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={cn(
-        'flex gap-3 p-4',
-        isUser && 'bg-muted/50'
-      )}
-    >
+    <div className="flex gap-3 p-4" data-testid="assistant-message">
       {/* Avatar */}
-      <div
-        className={cn(
-          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
-          isUser ? 'bg-primary' : 'bg-secondary'
-        )}
-      >
-        {isUser ? (
-          <User className="h-4 w-4 text-primary-foreground" />
-        ) : (
-          <Bot className="h-4 w-4 text-secondary-foreground" />
-        )}
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary">
+        <Bot className="h-4 w-4 text-secondary-foreground" />
       </div>
 
       {/* Content */}
       <div className="flex-1 space-y-2 overflow-hidden">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-sm">
-            {isUser ? 'You' : 'Assistant'}
-          </span>
-          {!isUser && isStreaming ? (
+          <span className="font-semibold text-sm">Assistant</span>
+          {isStreaming ? (
             <span
               className="text-xs text-muted-foreground"
               aria-label="Streaming"
@@ -289,7 +315,6 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
         {/* Message content - render segments */}
         <div className="prose prose-sm dark:prose-invert max-w-none">
           {hasExplicitTableBlocks ? (
-            // Render mixed content: text + explicit table block references
             explicitTableSegments.map((segment, index) =>
               segment.type === 'table' ? (
                 <TableBlockRenderer key={`table-${segment.value}-${index}`} tableId={segment.value} />
@@ -304,7 +329,6 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
               )
             )
           ) : hasMarkdownTables && parsedContent ? (
-            // Render parsed markdown tables as interactive Table IR
             parsedContent.segments.map((segment, index) =>
               segment.type === 'table' ? (
                 <InteractiveTable
@@ -323,7 +347,6 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
               )
             )
           ) : (
-            // No tables - render as plain markdown (existing behavior)
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={markdownComponents}
@@ -332,6 +355,41 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
             </ReactMarkdown>
           )}
         </div>
+
+        {!isStreaming && message.id === lastAssistantMessageId && pptArtifacts.length > 0 ? (
+          <div className="not-prose space-y-2">
+            {pptArtifacts.map((artifact) => (
+              <div
+                key={artifact.fileId || artifact.name}
+                className="flex flex-col gap-2 rounded-xl border bg-muted/10 px-4 py-3 text-sm"
+              >
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <CheckCircle className="h-4 w-4 text-emerald-500" />
+                  Presentation ready
+                </div>
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <div className="min-w-0">
+                    <div className="truncate text-foreground">{artifact.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatFileSize(artifact.size)}
+                    </div>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      if (!artifact.fileId) return;
+                      triggerDownload(message.sessionId, artifact.fileId, artifact.name);
+                    }}
+                    disabled={!artifact.fileId}
+                  >
+                    Download
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

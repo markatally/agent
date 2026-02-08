@@ -152,9 +152,32 @@ describe('Task Manager', () => {
       expect(allowed).toBe(false);
     });
     
-    it('should allow other tools without limits', () => {
+    it('should allow other tools on first call', () => {
       taskManager.initializeTask('sess1', 'user1', 'Create presentation');
       
+      const allowed = taskManager.shouldAllowToolCall('sess1', 'ppt_generator', { topic: 'AI' });
+      expect(allowed).toBe(true);
+    });
+  });
+
+  describe('consecutive failures', () => {
+    it('should block tool after consecutive failures', () => {
+      taskManager.initializeTask('sess1', 'user1', 'Create presentation');
+
+      taskManager.recordToolCall('sess1', 'ppt_generator', { topic: 'AI' }, {}, false);
+      taskManager.recordToolCall('sess1', 'ppt_generator', { topic: 'AI' }, {}, false);
+
+      const allowed = taskManager.shouldAllowToolCall('sess1', 'ppt_generator', { topic: 'AI' });
+      expect(allowed).toBe(false);
+    });
+
+    it('should reset failure count after a success', () => {
+      taskManager.initializeTask('sess1', 'user1', 'Create presentation');
+
+      taskManager.recordToolCall('sess1', 'ppt_generator', { topic: 'AI' }, {}, false);
+      taskManager.recordToolCall('sess1', 'ppt_generator', { topic: 'AI' }, {}, true);
+      taskManager.recordToolCall('sess1', 'ppt_generator', { topic: 'AI' }, {}, false);
+
       const allowed = taskManager.shouldAllowToolCall('sess1', 'ppt_generator', { topic: 'AI' });
       expect(allowed).toBe(true);
     });

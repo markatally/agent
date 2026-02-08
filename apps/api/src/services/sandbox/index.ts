@@ -8,3 +8,4 @@ export {
   getSandboxManager,
   clearSandboxManager,
 } from './manager';
+export { SandboxOrchestrator } from './orchestrator';

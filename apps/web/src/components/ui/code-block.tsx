@@ -8,6 +8,7 @@ const PURE_BLACK_STYLE = {
   margin: 0,
   background: '#000000',
   borderRadius: '0.5rem',
+  color: '#e6e6e6',
 };
 
 const COPY_RESET_MS = 2000;
@@ -59,7 +60,7 @@ export function CodeBlock({
         language={language}
         PreTag={PreTag}
         customStyle={{ ...PURE_BLACK_STYLE, ...customStyle }}
-        codeTagProps={{ style: { background: 'transparent' } }}
+        codeTagProps={{ style: { background: 'transparent', color: 'inherit' } }}
         lineProps={{ style: { background: 'transparent' } }}
       >
         {code}

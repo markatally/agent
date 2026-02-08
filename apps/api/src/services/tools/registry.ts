@@ -6,6 +6,13 @@ import { BashExecutorTool } from './bash_executor';
 import { PptGeneratorTool } from './ppt_generator';
 import { PaperSearchTool } from './paper_search';
 import { WebSearchTool } from './web_search';
+import { BrowserNavigateTool } from './browser_navigate';
+import { BrowserClickTool } from './browser_click';
+import { BrowserTypeTool } from './browser_type';
+import { BrowserScrollTool } from './browser_scroll';
+import { BrowserScreenshotTool } from './browser_screenshot';
+import { BrowserWaitTool } from './browser_wait';
+import { BrowserExtractTool } from './browser_extract';
 import { bridgeAllMCPToolsSync } from '../mcp/bridge';
 
 /**
@@ -30,6 +37,13 @@ export class ToolRegistry {
     this.register(new PptGeneratorTool(this.context));
     this.register(new PaperSearchTool(this.context));
     this.register(new WebSearchTool(this.context));
+    this.register(new BrowserNavigateTool(this.context));
+    this.register(new BrowserClickTool(this.context));
+    this.register(new BrowserTypeTool(this.context));
+    this.register(new BrowserScrollTool(this.context));
+    this.register(new BrowserScreenshotTool(this.context));
+    this.register(new BrowserWaitTool(this.context));
+    this.register(new BrowserExtractTool(this.context));
   }
 
   /**

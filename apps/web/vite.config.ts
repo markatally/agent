@@ -15,6 +15,19 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,
+        ws: true,
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes, _req, res) => {
+            const contentType = proxyRes.headers['content-type'] || '';
+            if (typeof contentType === 'string' && contentType.includes('text/event-stream')) {
+              proxyRes.headers['x-accel-buffering'] = 'no';
+              proxyRes.headers['cache-control'] = 'no-cache, no-transform';
+              if (typeof res.flushHeaders === 'function') {
+                res.flushHeaders();
+              }
+            }
+          });
+        },
       },
     },
   },

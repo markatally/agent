@@ -8,8 +8,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Last Updated** | 2026-02-04 |
-| **Active Phase** | Phase 10 - Chat Input UI & Skills Configuration |
+| **Last Updated** | 2026-02-08 |
+| **Active Phase** | Phase 11 - Manus Computer Mode Upgrade |
 | **Status** | ✅ Complete |
 | **Blocked By** | None |
 
@@ -28,7 +28,7 @@ The Mark Agent is a **complete full-stack AI agent system** with:
 - ✅ 282 tests passing (unit + integration)
 - ✅ Chat Input UI with Skills configuration (centered layout, user-level preferences)
 
-**Latest Architecture Addition:** Chat Input UI with centered layout, "+" menu, and user-level Skills configuration modal with per-user skill filtering at runtime.
+**Latest Architecture Addition:** Manus-style Computer mode for PPT tasks with step-based pipeline, live browsing visualization, and artifact download UX (PPT-only, backward-compatible).
 
 ---
 
@@ -443,6 +443,37 @@ bun run sync:skills --unprotect=<id>  # Unprotect skill
 
 <details>
 <summary>Click to expand session history</summary>
+
+### Session 14 — 2026-02-08
+
+**Manus Computer Mode Upgrade (Phase 11) - COMPLETE:**
+
+**Backend:**
+- Added PPT pipeline types in `apps/api/src/services/tasks/types.ts`
+- Implemented `PptPipelineController` to emit `ppt.pipeline.*` + `browse.activity` SSE events
+- Wired stream handlers to conditionally enable pipeline for PPT tasks (config flag guarded)
+- Updated config schema and default config to include `execution.pptPipeline.enabled`
+
+**Frontend:**
+- Added PPT pipeline types and state to `chatStore`
+- Added SSE handlers for pipeline + browsing activity
+- Built `PptPipelineTimeline` component and PPT-aware `ComputerPanel`
+- Ensured Computer tab only appears for PPT tasks
+- Added PPT artifact download card in DocumentRenderer (Download button + file size)
+- Updated Computer UI status/labels for completed vs active steps
+
+**Self-Testing & Visual Validation:**
+- Ran end-to-end PPT generation with Playwright; captured screenshots showing:
+  - Step timeline transitions (Research → Browsing → Reading → Synthesizing → Generating → Finalizing)
+  - Live Computer view updates and search activity
+  - PPT file download card with filename + size + Download button
+- Verified non-PPT flow remains unchanged (no Computer tab, no pipeline UI)
+- Iterated on pipeline ordering and UI status indicators until parity criteria met
+
+**Artifacts:**
+- Visual verification screenshots saved under `test-results/` (ppt-final.png, non-ppt.png)
+
+**Status:** ✅ Completed with Manus Computer parity target met
 
 ### Session 13 — 2026-02-04
 

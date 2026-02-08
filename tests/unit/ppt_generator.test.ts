@@ -63,6 +63,27 @@ describe('PptGeneratorTool', () => {
     expect(fileExists).toBe(true);
   });
 
+  it('should accept presentation JSON string input', async () => {
+    const tool = new PptGeneratorTool(mockContext);
+
+    const presentation = JSON.stringify({
+      title: 'String Input Presentation',
+      slides: [{ title: 'Slide 1', content: ['Hello from JSON string'] }],
+    });
+
+    const result = await tool.execute({
+      presentation,
+      filename: 'string-input.pptx',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('string-input.pptx');
+
+    const filePath = path.join(mockOutputDir, 'string-input.pptx');
+    const fileExists = await fs.access(filePath).then(() => true).catch(() => false);
+    expect(fileExists).toBe(true);
+  });
+
   it('should handle presentation with multiple slides', async () => {
     const tool = new PptGeneratorTool(mockContext);
 

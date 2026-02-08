@@ -322,7 +322,8 @@ export const chatApi = {
   async *sendAndStream(
     sessionId: string,
     content: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: { executionMode?: 'direct' | 'sandbox' }
   ): AsyncGenerator<SSEEvent, void, unknown> {
     const token = getAccessToken();
     const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/chat`, {
@@ -331,7 +332,10 @@ export const chatApi = {
         'Content-Type': 'application/json',
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({
+        content,
+        ...(options?.executionMode ? { execution_mode: options.executionMode } : {}),
+      }),
       signal,
     });
 

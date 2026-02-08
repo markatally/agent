@@ -57,3 +57,22 @@ export interface ExecOptions {
   timeout?: number;
   env?: Record<string, string>;
 }
+
+/**
+ * File tree node for sandbox workspace visualization
+ */
+export interface SandboxFileTreeNode {
+  path: string;
+  type: 'file' | 'directory';
+  size?: number;
+  children?: SandboxFileTreeNode[];
+}
+
+/**
+ * Exported artifact info from sandbox workspace
+ */
+export interface SandboxArtifactInfo {
+  path: string;
+  size: number;
+  mimeType: string;
+}
