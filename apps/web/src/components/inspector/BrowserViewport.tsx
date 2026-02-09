@@ -113,6 +113,7 @@ export function BrowserViewport({ sessionId, enabled, snapshotUrl, showLive = tr
 
   return (
     <div
+      data-testid="browser-viewport"
       className={cn('overflow-hidden rounded-lg border bg-black', className)}
       style={{ aspectRatio: ASPECT_RATIO }}
     >
@@ -124,6 +125,7 @@ export function BrowserViewport({ sessionId, enabled, snapshotUrl, showLive = tr
         />
       ) : snapshotUrl ? (
         <img
+          data-testid="browser-viewport-screenshot"
           src={snapshotUrl}
           alt="Browser screenshot"
           className="h-full w-full object-contain"

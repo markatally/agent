@@ -104,6 +104,7 @@ interface PptPipelineState {
 
 const SIDEBAR_OPEN_STORAGE_KEY = 'sidebar-open';
 const EXECUTION_MODE_STORAGE_KEY = 'execution-mode';
+const COMPUTER_STATE_PREFIX = 'mark-agent-computer-';
 
 const getInitialSidebarOpen = () => {
   const stored = localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY);
@@ -232,6 +233,21 @@ interface ChatState {
   setBrowserClosed: (sessionId: string) => void;
   setBrowserActionIndex: (sessionId: string, index: number) => void;
   clearBrowserSession: (sessionId: string) => void;
+  loadComputerStateFromStorage: (sessionId: string) => void;
+}
+
+function persistComputerState(get: () => ChatState, sessionId: string) {
+  try {
+    const state = get();
+    const data = {
+      browserSession: state.browserSession.get(sessionId) ?? null,
+      pptPipeline: state.pptPipeline.get(sessionId) ?? null,
+      isPptTask: state.isPptTask.get(sessionId) ?? false,
+    };
+    localStorage.setItem(COMPUTER_STATE_PREFIX + sessionId, JSON.stringify(data));
+  } catch (_) {
+    /* ignore quota / parse */
+  }
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -668,6 +684,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isPptTask.set(sessionId, true);
       return { pptPipeline, isPptTask };
     });
+    persistComputerState(get, sessionId);
   },
 
   updatePptStep: (sessionId: string, step: PptStep, status: PptStepStatus) => {
@@ -685,6 +702,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return { pptPipeline };
     });
+    persistComputerState(get, sessionId);
   },
 
   addBrowseActivity: (sessionId: string, activity: BrowseActivity) => {
@@ -698,6 +716,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return { pptPipeline };
     });
+    persistComputerState(get, sessionId);
   },
 
   clearPptPipeline: (sessionId: string) => {
@@ -708,6 +727,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isPptTask.delete(sessionId);
       return { pptPipeline, isPptTask };
     });
+    persistComputerState(get, sessionId);
   },
 
   setBrowserLaunched: (sessionId: string) => {
@@ -723,6 +743,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return { browserSession };
     });
+    persistComputerState(get, sessionId);
   },
 
   setBrowserNavigated: (sessionId: string, url: string, title?: string) => {
@@ -743,6 +764,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return { browserSession };
     });
+    persistComputerState(get, sessionId);
   },
 
   addBrowserAction: (sessionId: string, action: BrowserAction) => {
@@ -764,6 +786,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return { browserSession };
     });
+    persistComputerState(get, sessionId);
   },
 
   setBrowserActionScreenshot: (sessionId: string, screenshotDataUrl: string) => {
@@ -777,6 +800,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       browserSession.set(sessionId, { ...existing, actions });
       return { browserSession };
     });
+    persistComputerState(get, sessionId);
   },
 
   setBrowserClosed: (sessionId: string) => {
@@ -788,6 +812,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       return { browserSession };
     });
+    persistComputerState(get, sessionId);
   },
 
   setBrowserActionIndex: (sessionId: string, index: number) => {
@@ -807,5 +832,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
       browserSession.delete(sessionId);
       return { browserSession };
     });
+    persistComputerState(get, sessionId);
+  },
+
+  loadComputerStateFromStorage: (sessionId: string) => {
+    try {
+      const raw = localStorage.getItem(COMPUTER_STATE_PREFIX + sessionId);
+      if (!raw) return;
+      const data = JSON.parse(raw) as {
+        browserSession?: BrowserSessionState | null;
+        pptPipeline?: PptPipelineState | null;
+        isPptTask?: boolean;
+      };
+      set((state) => {
+        const next: Partial<ChatState> = {};
+        if (data.browserSession != null) {
+          const browserSession = new Map(state.browserSession);
+          browserSession.set(sessionId, data.browserSession);
+          next.browserSession = browserSession;
+        }
+        if (data.pptPipeline != null) {
+          const pptPipeline = new Map(state.pptPipeline);
+          pptPipeline.set(sessionId, data.pptPipeline);
+          next.pptPipeline = pptPipeline;
+        }
+        if (data.isPptTask != null) {
+          const isPptTask = new Map(state.isPptTask);
+          isPptTask.set(sessionId, data.isPptTask);
+          next.isPptTask = isPptTask;
+        }
+        return next;
+      });
+    } catch (_) {
+      /* ignore */
+    }
   },
 }));

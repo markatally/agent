@@ -211,16 +211,16 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
           <div className="space-y-3 px-4 pb-4">
             <div className="text-xs text-muted-foreground">{activityLabel}</div>
 
-            {/* Browser viewport when session is active or we have recorded actions (playback) */}
+            {/* Always show browser viewport area so screenshots have a place to appear */}
+            <BrowserToolbar
+              status={browserSession?.status ?? (browserActions.length > 0 ? 'closed' : 'active')}
+              currentUrl={displayUrl}
+              currentTitle={displayTitle ?? browserSession?.currentTitle}
+              actionLabel={actionLabel}
+              isLive={isLive}
+            />
             {isBrowserMode || browserActions.length > 0 ? (
               <>
-                <BrowserToolbar
-                  status={browserSession?.status ?? (browserActions.length > 0 ? 'closed' : 'active')}
-                  currentUrl={displayUrl}
-                  currentTitle={displayTitle ?? browserSession?.currentTitle}
-                  actionLabel={actionLabel}
-                  isLive={isLive}
-                />
                 <BrowserViewport
                   sessionId={sessionId}
                   enabled={isBrowserMode}
@@ -240,92 +240,31 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
                 )}
               </>
             ) : (
-              <>
-                <div className="rounded-lg border bg-background/50 px-3 py-2 text-xs text-muted-foreground">
-                  {lastActivity?.url
-                    ? lastActivity.url
-                    : lastActivity?.query
-                    ? `Search: ${lastActivity.query}`
-                    : searchQueries[searchQueries.length - 1]?.query
-                    ? `Search: ${searchQueries[searchQueries.length - 1]?.query}`
-                    : 'Waiting for browsing activity...'}
-                </div>
-
-                <div className="rounded-lg border bg-background/40 p-3">
-                  {currentPipelineStep === 'browsing' ? (
-                    <div className="space-y-3">
-                      <div className="text-xs text-muted-foreground">
-                        Results ({browseResults.length})
-                      </div>
-                      {browseResults.length === 0 ? (
-                        <div className="text-sm text-muted-foreground">
-                          Collecting search results...
-                        </div>
-                      ) : (
-                        browseResults.map((result, index) => (
-                          <div key={`${result.url}-${index}`} className="space-y-1">
-                            <div className="text-sm font-medium text-foreground line-clamp-2">
-                              {result.title || result.url}
-                            </div>
-                            <div className="text-xs text-muted-foreground line-clamp-1">
-                              {result.url}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  ) : currentPipelineStep === 'reading' ? (
-                    <div className="space-y-2">
-                      <div className="text-sm text-foreground">Reading sources...</div>
-                      <div className="text-xs text-muted-foreground">
-                        {browseResults.length} sources queued for analysis.
-                      </div>
-                    </div>
-                  ) : currentPipelineStep === 'synthesizing' ? (
-                    <div className="space-y-2">
-                      <div className="text-sm text-foreground">Synthesizing findings...</div>
-                      <div className="text-xs text-muted-foreground">
-                        Consolidating notes into a slide-ready narrative.
-                      </div>
-                    </div>
-                  ) : currentPipelineStep === 'generating' ? (
-                    <div className="space-y-2">
-                      <div className="text-sm text-foreground">Generating slides...</div>
-                      <div className="text-xs text-muted-foreground">
-                        Building deck structure and slide content.
-                      </div>
-                    </div>
-                  ) : currentPipelineStep === 'finalizing' ? (
-                    <div className="space-y-2">
-                      <div className="text-sm text-foreground">Finalizing output...</div>
-                      {pptFiles.length > 0 ? (
-                        <div className="space-y-2">
-                          {pptFiles.map((file) => (
-                            <div
-                              key={file.fileId || file.name}
-                              className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
-                            >
-                              <div className="min-w-0 truncate">{file.name}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {formatFileSize(file.size)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-xs text-muted-foreground">Preparing file output...</div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="text-sm text-foreground">Scoping research...</div>
-                      <div className="text-xs text-muted-foreground">
-                        Identifying the best sources to review.
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
+              <div
+                data-testid="computer-viewport-placeholder"
+                className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center"
+                style={{ aspectRatio: 16 / 9 }}
+              >
+                <p className="text-sm font-medium text-muted-foreground">
+                  Screenshots of each step will appear here
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {currentPipelineStep === 'browsing' && browseResults.length === 0
+                    ? 'Collecting search results…'
+                    : currentPipelineStep === 'reading'
+                    ? 'Reading sources…'
+                    : 'As the agent visits each page, a screenshot will be added to the timeline below.'}
+                </p>
+                {(lastActivity?.url || lastActivity?.query || searchQueries[searchQueries.length - 1]?.query) && (
+                  <p className="text-xs text-muted-foreground truncate max-w-full">
+                    {lastActivity?.url
+                      ? lastActivity.url
+                      : lastActivity?.query
+                      ? `Search: ${lastActivity.query}`
+                      : `Search: ${searchQueries[searchQueries.length - 1]?.query}`}
+                  </p>
+                )}
+              </div>
             )}
 
             <div className="flex items-center justify-between text-xs text-muted-foreground">

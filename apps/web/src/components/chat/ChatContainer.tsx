@@ -34,6 +34,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const stopStreaming = useChatStore((state) => state.stopStreaming);
   const setThinking = useChatStore((state) => state.setThinking);
   const isStreaming = useChatStore((state) => state.isStreaming);
+  const streamingSessionId = useChatStore((state) => state.streamingSessionId);
   const startToolCall = useChatStore((state) => state.startToolCall);
   const completeToolCall = useChatStore((state) => state.completeToolCall);
   const messages = useChatStore((state) => state.messages.get(sessionId) || []);
@@ -69,17 +70,17 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const setBrowserClosed = useChatStore((state) => state.setBrowserClosed);
   const clearBrowserSession = useChatStore((state) => state.clearBrowserSession);
   const clearFiles = useChatStore((state) => state.clearFiles);
+  const loadComputerStateFromStorage = useChatStore((state) => state.loadComputerStateFromStorage);
 
-  // Clear tool calls, tables, file artifacts, and message selection when session changes
-  // so the new chat does not show files from the previous session
+  // Clear tool calls, tables, file artifacts, and message selection when session changes.
+  // Rehydrate Computer tab state (browser/PPT) from localStorage so it survives refresh.
   useEffect(() => {
     clearToolCalls();
     clearTables();
     clearFiles(sessionId);
-    clearPptPipeline(sessionId);
-    clearBrowserSession(sessionId);
     setSelectedMessageId(null);
-  }, [sessionId, clearToolCalls, clearTables, clearFiles, clearPptPipeline, clearBrowserSession, setSelectedMessageId]);
+    loadComputerStateFromStorage(sessionId);
+  }, [sessionId, clearToolCalls, clearTables, clearFiles, setSelectedMessageId, loadComputerStateFromStorage]);
 
   // Scroll to bottom helper
   const scrollToBottom = () => {
@@ -557,7 +558,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       <ChatInput
         onSend={handleSendMessage}
         disabled={isSending || (!isSessionValid && !isSessionLoading)}
-        sendDisabled={isStreaming}
+        sendDisabled={isStreaming && streamingSessionId === sessionId}
         onStop={handleStopStreaming}
         onOpenSkills={onOpenSkills}
       />

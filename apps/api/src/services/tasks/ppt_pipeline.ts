@@ -210,21 +210,26 @@ export class PptPipelineController {
     if (!content) return;
     try {
       const parsed = JSON.parse(content);
-      const results = Array.isArray(parsed?.results) ? parsed.results : [];
+      // Support multiple shapes: .results (web_search, paper_search), .data, or array at top level
+      const results = Array.isArray(parsed?.results)
+        ? parsed.results
+        : Array.isArray(parsed?.data)
+          ? parsed.data
+          : Array.isArray(parsed)
+            ? parsed
+            : [];
       const urls: Array<{ url: string; title?: string }> = [];
       for (const result of results.slice(0, 5)) {
-        // web_search results use `url`, paper_search results use `link`
-        const resultUrl: string | undefined = result?.url || result?.link;
-        if (!resultUrl) continue;
-        urls.push({ url: resultUrl, title: result.title || resultUrl });
+        const resultUrl: string | undefined =
+          result?.url ?? result?.link ?? result?.href ?? (typeof result === 'string' ? result : undefined);
+        if (!resultUrl || !resultUrl.startsWith('http')) continue;
+        urls.push({ url: resultUrl, title: result?.title ?? resultUrl });
         await this.emitBrowseActivity({
           action: 'visit',
           url: resultUrl,
-          title: result.title || resultUrl,
+          title: result?.title ?? resultUrl,
         });
       }
-      // Launch browser and navigate to discovered URLs in background
-      // (fire-and-forget so SSE event delivery is not blocked)
       if (urls.length > 0) {
         this.navigateToResults(urls).catch((err) => {
           console.error('[PptPipeline] navigateToResults error:', err);
