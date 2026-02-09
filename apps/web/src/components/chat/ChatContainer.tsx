@@ -106,6 +106,10 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
     };
 
     const appendWebSearchResultSteps = (toolData: any) => {
+      const hasBrowserActions =
+        (useChatStore.getState().browserSession.get(sessionId)?.actions?.length ?? 0) > 0;
+      if (hasBrowserActions) return;
+
       const artifacts = Array.isArray(toolData?.artifacts) ? toolData.artifacts : [];
       const searchArtifact = artifacts.find(
         (artifact: any) =>

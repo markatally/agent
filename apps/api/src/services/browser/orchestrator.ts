@@ -16,6 +16,28 @@ function isBrowserTool(toolName: string): boolean {
   return toolName.startsWith(BROWSER_TOOL_PREFIX);
 }
 
+function extractWebSearchUrls(result: ToolResult): string[] {
+  const artifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+  const searchArtifact = artifacts.find(
+    (artifact) => artifact?.name === 'search-results.json' && typeof artifact?.content === 'string'
+  );
+  if (!searchArtifact || typeof searchArtifact.content !== 'string') {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(searchArtifact.content) as {
+      results?: Array<{ url?: string }>;
+    };
+    const rows = Array.isArray(parsed.results) ? parsed.results : [];
+    return rows
+      .map((row) => row?.url?.trim())
+      .filter((url): url is string => Boolean(url));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Create a tool executor that emits SSE events for browser tools.
  */
@@ -28,12 +50,9 @@ export function createBrowserObservableExecutor(
 
   return {
     async execute(toolName: string, params: Record<string, any>, options?: { onProgress?: any }) {
-      if (!isBrowserTool(toolName)) {
-        return baseExecutor.execute(toolName, params, options);
-      }
-
       const manager = getBrowserManager();
-      if (!manager.isEnabled()) {
+      const shouldTrackBrowser = isBrowserTool(toolName) || toolName === 'web_search';
+      if (!shouldTrackBrowser || !manager.isEnabled()) {
         return baseExecutor.execute(toolName, params, options);
       }
 
@@ -51,6 +70,74 @@ export function createBrowserObservableExecutor(
       }
 
       const result: ToolResult = await baseExecutor.execute(toolName, params, options);
+
+      if (toolName === 'web_search' && result.success) {
+        const session = manager.getSession(sessionId);
+        if (session?.page) {
+          const urls = extractWebSearchUrls(result);
+          for (const url of urls) {
+            let navOk = false;
+            try {
+              await session.page.goto(url, {
+                waitUntil: 'domcontentloaded',
+                timeout: 15000,
+              });
+              const title = await session.page.title().catch(() => undefined);
+              manager.setCurrentUrl(sessionId, session.page.url(), title);
+              await emit({
+                type: 'browser.navigated',
+                sessionId,
+                data: {
+                  url: session.page.url(),
+                  title,
+                },
+              });
+              navOk = true;
+            } catch (error) {
+              await emit({
+                type: 'browser.action',
+                sessionId,
+                data: {
+                  action: 'browser_navigate',
+                  params: { url },
+                  success: false,
+                  error: error instanceof Error ? error.message : 'Navigation failed',
+                },
+              });
+            }
+
+            if (!navOk) continue;
+
+            await emit({
+              type: 'browser.action',
+              sessionId,
+              data: {
+                action: 'browser_navigate',
+                params: { url: session.page.url() },
+                success: true,
+                output: `Visited ${session.page.url()} from web search`,
+              },
+            });
+
+            try {
+              const buf = await session.page.screenshot({
+                type: 'jpeg',
+                quality: 60,
+                timeout: 5000,
+              });
+              const base64 = Buffer.isBuffer(buf) ? buf.toString('base64') : (buf as string);
+              await emit({
+                type: 'browser.screenshot',
+                sessionId,
+                data: { screenshot: base64 },
+              });
+            } catch (_) {
+              /* non-fatal; skip this screenshot */
+            }
+          }
+        }
+        return result;
+      }
 
       if (toolName === 'browser_navigate' && result.success) {
         const info = manager.getSessionInfo(sessionId);
