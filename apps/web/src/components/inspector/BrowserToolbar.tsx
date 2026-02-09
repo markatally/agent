@@ -8,6 +8,8 @@ interface BrowserToolbarProps {
   actionLabel?: string;
   isLive?: boolean;
   className?: string;
+  /** When set (e.g. PPT search mode), show this instead of "Agent is using Browser" */
+  displayLabel?: string;
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -30,14 +32,16 @@ export function BrowserToolbar({
   actionLabel,
   isLive = true,
   className,
+  displayLabel,
 }: BrowserToolbarProps) {
-  const displayUrl = currentUrl || 'No page loaded';
+  const displayUrl = currentUrl || (displayLabel ? '' : 'No page loaded');
   const statusText = status === 'active' ? (actionLabel ?? 'Browsing') : status === 'closed' ? 'Closed' : 'Launching...';
+  const titleLabel = displayLabel ?? 'Agent is using Browser';
 
   return (
     <div className={cn('space-y-2', className)}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">Agent is using Browser</span>
+        <span className="font-medium text-foreground">{titleLabel}</span>
         <span>{statusText}</span>
         {isLive && status === 'active' && (
           <span className="flex items-center gap-1">
@@ -49,7 +53,7 @@ export function BrowserToolbar({
       <div className="flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-xs">
         <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate text-muted-foreground" title={currentTitle ?? displayUrl}>
-          {displayUrl}
+          {displayUrl || (displayLabel ? '—' : 'No page loaded')}
         </span>
       </div>
     </div>

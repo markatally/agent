@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChatStore } from '../../stores/chatStore';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
-import { PptPipelineTimeline } from './PptPipelineTimeline';
 import { BrowserViewport } from './BrowserViewport';
 import { BrowserToolbar, getBrowserActionLabel } from './BrowserToolbar';
 import { TimelineScrubber } from './TimelineScrubber';
@@ -62,6 +61,33 @@ const parseAnsiSegments = (input: string): Array<{ text: string; className?: str
   return segments;
 };
 
+const getNearestTimelineScreenshot = (
+  steps: Array<{ snapshot?: { screenshot?: string | null } }>,
+  currentIndex: number
+): string | null => {
+  if (!steps.length || currentIndex < 0 || currentIndex >= steps.length) return null;
+  const current = steps[currentIndex]?.snapshot?.screenshot;
+  if (current) return current;
+
+  for (let offset = 1; offset < steps.length; offset++) {
+    const prev = steps[currentIndex - offset]?.snapshot?.screenshot;
+    if (prev) return prev;
+    const next = steps[currentIndex + offset]?.snapshot?.screenshot;
+    if (next) return next;
+  }
+  return null;
+};
+
+const getLatestBrowserActionScreenshot = (
+  actions: Array<{ screenshotDataUrl?: string | null }>
+): string | null => {
+  for (let i = actions.length - 1; i >= 0; i--) {
+    const shot = actions[i]?.screenshotDataUrl;
+    if (shot) return shot;
+  }
+  return null;
+};
+
 export function ComputerPanel({ sessionId }: ComputerPanelProps) {
   const terminalLines = useChatStore((state) => state.terminalLines.get(sessionId) || []);
   const executionSteps = useChatStore((state) => state.executionSteps.get(sessionId) || []);
@@ -72,8 +98,11 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
   const fileArtifacts = useChatStore((state) => state.files.get(sessionId) || []);
   const browserSession = useChatStore((state) => state.browserSession.get(sessionId));
   const setBrowserActionIndex = useChatStore((state) => state.setBrowserActionIndex);
+  const agentTimeline = useChatStore((state) => state.agentSteps.get(sessionId));
+  const setAgentStepIndex = useChatStore((state) => state.setAgentStepIndex);
 
   const [followOutput, setFollowOutput] = useState(true);
+  const [selectedVisitIndex, setSelectedVisitIndex] = useState(0);
   const terminalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -150,8 +179,25 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
   const actionLabel = lastBrowserAction
     ? getBrowserActionLabel(`browser_${lastBrowserAction.type}`)
     : 'Browsing';
+  const agentSteps = agentTimeline?.steps ?? [];
+  const agentCurrentIndex = Math.max(
+    0,
+    Math.min(agentTimeline?.currentStepIndex ?? Math.max(0, agentSteps.length - 1), Math.max(0, agentSteps.length - 1))
+  );
+  const selectedAgentStep = agentSteps[agentCurrentIndex];
+  const selectedSnapshotUrl = selectedAgentStep?.snapshot?.screenshot ?? null;
+  const selectedStepUrl = selectedAgentStep?.snapshot?.url ?? displayUrl;
+  const selectedStepTitle = selectedAgentStep?.snapshot?.metadata?.actionDescription;
+  const isAtLatestAgentStep = agentSteps.length === 0 || agentCurrentIndex >= agentSteps.length - 1;
 
   if (isBrowserMode && !(isPptTask && pptPipeline)) {
+    const hasAgentTimeline = agentSteps.length > 0;
+    const replayIndex = hasAgentTimeline ? agentCurrentIndex : browserCurrentIndex;
+    const replayTotal = hasAgentTimeline ? agentSteps.length : browserActions.length;
+    const replayLive = hasAgentTimeline ? isAtLatestAgentStep : isAtLatestAction;
+    const replaySnapshot = hasAgentTimeline
+      ? selectedSnapshotUrl
+      : browserActions[browserCurrentIndex]?.screenshotDataUrl ?? null;
     return (
       <div className="space-y-4">
         <section className="rounded-xl border bg-muted/10">
@@ -165,25 +211,43 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
           <div className="space-y-3 px-4 pb-4">
             <BrowserToolbar
               status={browserSession?.status ?? 'active'}
-              currentUrl={displayUrl}
-              currentTitle={displayTitle ?? browserSession?.currentTitle}
-              actionLabel={actionLabel}
-              isLive
+              currentUrl={selectedStepUrl}
+              currentTitle={selectedStepTitle ?? displayTitle ?? browserSession?.currentTitle}
+              actionLabel={selectedStepTitle ?? actionLabel}
+              isLive={replayLive}
             />
             <BrowserViewport
               sessionId={sessionId}
               enabled={isBrowserMode}
-              snapshotUrl={browserActions[browserCurrentIndex]?.screenshotDataUrl ?? null}
-              showLive={isAtLatestAction}
+              snapshotUrl={replaySnapshot}
+              showLive={replayLive}
             />
             <TimelineScrubber
-              currentIndex={browserCurrentIndex}
-              totalSteps={browserActions.length}
-              isLive
-              onPrevious={() => setBrowserActionIndex(sessionId, browserCurrentIndex - 1)}
-              onNext={() => setBrowserActionIndex(sessionId, browserCurrentIndex + 1)}
-              onJumpToLive={() => setBrowserActionIndex(sessionId, Math.max(0, browserActions.length - 1))}
-              onSeek={(index) => setBrowserActionIndex(sessionId, index)}
+              currentIndex={replayIndex}
+              totalSteps={replayTotal}
+              isLive={replayLive}
+              onPrevious={() =>
+                hasAgentTimeline
+                  ? setAgentStepIndex(sessionId, replayIndex - 1)
+                  : setBrowserActionIndex(sessionId, replayIndex - 1)
+              }
+              onNext={() =>
+                hasAgentTimeline
+                  ? setAgentStepIndex(sessionId, replayIndex + 1)
+                  : setBrowserActionIndex(sessionId, replayIndex + 1)
+              }
+              onJumpToLive={() =>
+                hasAgentTimeline
+                  ? setAgentStepIndex(sessionId, Math.max(0, replayTotal - 1))
+                  : setBrowserActionIndex(sessionId, Math.max(0, replayTotal - 1))
+              }
+              onSeek={(index) =>
+                hasAgentTimeline
+                  ? setAgentStepIndex(sessionId, index)
+                  : setBrowserActionIndex(sessionId, index)
+              }
+              showBackForwardLabels
+              stepLabel="Step"
             />
           </div>
         </section>
@@ -199,75 +263,227 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
     const isLive = currentStepStatus === 'running';
 
     return (
-      <div className="space-y-4">
-        <section className="rounded-xl border bg-muted/10">
-          <div className="flex items-center justify-between gap-2 px-4 py-3">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-muted/10">
+          <div className="flex shrink-0 items-center justify-between gap-2 px-4 py-3">
             <div className="text-sm font-medium text-foreground">Computer</div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className={cn('h-2 w-2 rounded-full', isLive ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/50')} />
               {isLive ? 'Live' : 'Complete'}
             </div>
           </div>
-          <div className="space-y-3 px-4 pb-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
             <div className="text-xs text-muted-foreground">{activityLabel}</div>
 
-            {/* Always show browser viewport area so screenshots have a place to appear */}
-            <BrowserToolbar
-              status={browserSession?.status ?? (browserActions.length > 0 ? 'closed' : 'active')}
-              currentUrl={displayUrl}
-              currentTitle={displayTitle ?? browserSession?.currentTitle}
-              actionLabel={actionLabel}
-              isLive={isLive}
-            />
-            {isBrowserMode || browserActions.length > 0 ? (
-              <>
-                <BrowserViewport
-                  sessionId={sessionId}
-                  enabled={isBrowserMode}
-                  snapshotUrl={browserActions[browserCurrentIndex]?.screenshotDataUrl ?? null}
-                  showLive={isLive && isAtLatestAction}
-                />
-                {browserActions.length > 0 && (
-                  <TimelineScrubber
-                    currentIndex={browserCurrentIndex}
-                    totalSteps={browserActions.length}
-                    isLive={isLive}
-                    onPrevious={() => setBrowserActionIndex(sessionId, browserCurrentIndex - 1)}
-                    onNext={() => setBrowserActionIndex(sessionId, browserCurrentIndex + 1)}
-                    onJumpToLive={() => setBrowserActionIndex(sessionId, Math.max(0, browserActions.length - 1))}
-                    onSeek={(index) => setBrowserActionIndex(sessionId, index)}
+            {(() => {
+              const hasTimeline = agentSteps.length > 0;
+              const hasBrowser = isBrowserMode || browserActions.length > 0 || hasTimeline;
+              const searchModeUrl =
+                lastActivity?.url ??
+                (lastActivity?.query ? `Search: ${lastActivity.query}` : undefined) ??
+                (searchQueries[searchQueries.length - 1]?.query
+                  ? `Search: ${searchQueries[searchQueries.length - 1].query}`
+                  : '');
+              const visitOnlyMode = !hasBrowser && browseResults.length > 0;
+              const clampedVisitIndex = visitOnlyMode
+                ? Math.max(0, Math.min(selectedVisitIndex, browseResults.length - 1))
+                : 0;
+              const selectedVisit = visitOnlyMode ? browseResults[clampedVisitIndex] : null;
+              const visitViewportUrl = selectedVisit?.url;
+              const visitViewportTitle = selectedVisit?.title;
+              const visitScreenshotUrl = selectedVisit?.screenshotDataUrl ?? null;
+              const viewportUrl = hasTimeline ? selectedStepUrl : displayUrl;
+              const viewportTitle = hasTimeline
+                ? selectedStepTitle ?? displayTitle ?? browserSession?.currentTitle
+                : displayTitle ?? browserSession?.currentTitle;
+              const viewportSnapshot = hasTimeline
+                ? selectedSnapshotUrl ??
+                  getNearestTimelineScreenshot(agentSteps, agentCurrentIndex) ??
+                  (browserActions[browserCurrentIndex]?.screenshotDataUrl ??
+                    getLatestBrowserActionScreenshot(browserActions) ??
+                    null)
+                : browserActions[browserCurrentIndex]?.screenshotDataUrl ?? null;
+              const timelineIndex = hasTimeline ? agentCurrentIndex : browserCurrentIndex;
+              const timelineTotal = hasTimeline ? agentSteps.length : browserActions.length;
+              const timelineIsLive = hasTimeline ? isAtLatestAgentStep : isAtLatestAction;
+              return (
+                <>
+                  <BrowserToolbar
+                    status={browserSession?.status ?? (browserActions.length > 0 ? 'closed' : 'active')}
+                    currentUrl={
+                      hasBrowser ? viewportUrl : visitOnlyMode && visitViewportUrl ? visitViewportUrl : searchModeUrl
+                    }
+                    currentTitle={
+                      hasBrowser ? viewportTitle : visitViewportTitle
+                    }
+                    actionLabel={selectedStepTitle ?? actionLabel}
+                    isLive={timelineIsLive}
+                    displayLabel={hasBrowser ? undefined : activityLabel}
                   />
-                )}
-              </>
-            ) : (
-              <div
-                data-testid="computer-viewport-placeholder"
-                className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center"
-                style={{ aspectRatio: 16 / 9 }}
-              >
-                <p className="text-sm font-medium text-muted-foreground">
-                  Screenshots of each step will appear here
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {currentPipelineStep === 'browsing' && browseResults.length === 0
-                    ? 'Collecting search results…'
-                    : currentPipelineStep === 'reading'
-                    ? 'Reading sources…'
-                    : 'As the agent visits each page, a screenshot will be added to the timeline below.'}
-                </p>
-                {(lastActivity?.url || lastActivity?.query || searchQueries[searchQueries.length - 1]?.query) && (
-                  <p className="text-xs text-muted-foreground truncate max-w-full">
-                    {lastActivity?.url
-                      ? lastActivity.url
-                      : lastActivity?.query
-                      ? `Search: ${lastActivity.query}`
-                      : `Search: ${searchQueries[searchQueries.length - 1]?.query}`}
-                  </p>
-                )}
-              </div>
-            )}
+                  {hasBrowser ? (
+                    <>
+                      <BrowserViewport
+                        sessionId={sessionId}
+                        enabled={isBrowserMode}
+                        snapshotUrl={viewportSnapshot}
+                        showLive={isLive && timelineIsLive}
+                      />
+                      {timelineTotal > 0 && (
+                        <TimelineScrubber
+                          currentIndex={timelineIndex}
+                          totalSteps={timelineTotal}
+                          isLive={timelineIsLive}
+                          onPrevious={() =>
+                            hasTimeline
+                              ? setAgentStepIndex(sessionId, timelineIndex - 1)
+                              : setBrowserActionIndex(sessionId, timelineIndex - 1)
+                          }
+                          onNext={() =>
+                            hasTimeline
+                              ? setAgentStepIndex(sessionId, timelineIndex + 1)
+                              : setBrowserActionIndex(sessionId, timelineIndex + 1)
+                          }
+                          onJumpToLive={() =>
+                            hasTimeline
+                              ? setAgentStepIndex(sessionId, Math.max(0, timelineTotal - 1))
+                              : setBrowserActionIndex(sessionId, Math.max(0, timelineTotal - 1))
+                          }
+                          onSeek={(index) =>
+                            hasTimeline
+                              ? setAgentStepIndex(sessionId, index)
+                              : setBrowserActionIndex(sessionId, index)
+                          }
+                          showBackForwardLabels
+                          stepLabel="Step"
+                        />
+                      )}
+                      {!viewportSnapshot && (
+                        <div
+                          data-testid="computer-viewport-placeholder"
+                          className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
+                        >
+                          Snapshot unavailable for this step. Agent execution continued without blocking.
+                        </div>
+                      )}
+                    </>
+                  ) : browseResults.length > 0 ? (
+                    <>
+                      {visitScreenshotUrl ? (
+                        <BrowserViewport
+                          sessionId={sessionId}
+                          enabled={false}
+                          snapshotUrl={visitScreenshotUrl}
+                          showLive={false}
+                        />
+                      ) : (
+                        <div
+                          data-testid="computer-viewport-placeholder"
+                          className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center"
+                          style={{ aspectRatio: 16 / 9 }}
+                        >
+                          {visitViewportUrl ? (
+                            <>
+                              <p className="text-sm font-medium text-foreground truncate max-w-full">
+                                {visitViewportTitle ?? visitViewportUrl}
+                              </p>
+                              <a
+                                href={visitViewportUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-primary underline underline-offset-2"
+                              >
+                                Open in new tab
+                              </a>
+                              {pptPipeline?.browserUnavailable && (
+                                <p className="text-xs text-muted-foreground">
+                                  Screenshots require browser.
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-sm font-medium text-muted-foreground">
+                              Select a page below to view.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      <TimelineScrubber
+                        currentIndex={clampedVisitIndex}
+                        totalSteps={browseResults.length}
+                        isLive={false}
+                        onPrevious={() => setSelectedVisitIndex((i) => Math.max(0, i - 1))}
+                        onNext={() =>
+                          setSelectedVisitIndex((i) => Math.min(browseResults.length - 1, i + 1))
+                        }
+                        onJumpToLive={() => setSelectedVisitIndex(Math.max(0, browseResults.length - 1))}
+                        onSeek={(index) => setSelectedVisitIndex(index)}
+                        showBackForwardLabels
+                        stepLabel="Page"
+                      />
+                      <div
+                        data-testid="computer-key-pages-list"
+                        className="flex min-h-0 flex-1 flex-col gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-4"
+                      >
+                        {pptPipeline?.browserUnavailable && !visitScreenshotUrl && (
+                          <p className="text-xs text-muted-foreground">
+                            Browser not available; showing key pages from search only.
+                          </p>
+                        )}
+                        <p className="text-sm font-medium text-muted-foreground">Key pages from search</p>
+                        <ul className="min-w-0 list-none space-y-1.5 overflow-y-auto text-xs">
+                          {browseResults.map((visit, idx) => (
+                            <li
+                              key={`${visit.url}-${idx}`}
+                              className={cn(
+                                'flex flex-col gap-0.5 rounded px-2 py-1 -mx-2',
+                                idx === clampedVisitIndex && 'bg-muted/40'
+                              )}
+                            >
+                              <a
+                                href={visit.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="truncate font-medium text-foreground underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-foreground"
+                                title={visit.url}
+                              >
+                                {visit.title ?? visit.url}
+                              </a>
+                              <span className="truncate text-muted-foreground" title={visit.url}>
+                                {visit.url}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </>
+                  ) : (
+                    <div
+                      data-testid="computer-viewport-placeholder"
+                      className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center"
+                      style={{ aspectRatio: 16 / 9 }}
+                    >
+                      <p className="text-sm font-medium text-muted-foreground">
+                        No visual steps yet
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {currentPipelineStep === 'browsing' && browseResults.length === 0
+                          ? 'Collecting search results…'
+                          : currentPipelineStep === 'reading'
+                          ? 'Reading sources…'
+                          : 'Snapshots will appear as the agent performs browser or search steps.'}
+                      </p>
+                      {searchModeUrl && (
+                        <p className="text-xs text-muted-foreground truncate max-w-full">
+                          {searchModeUrl}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex shrink-0 items-center justify-between text-xs text-muted-foreground">
               <div>
                 Step {stepIndex + 1} of {pptPipeline.steps.length}:{' '}
                 {pptPipeline.steps[stepIndex]?.label}
@@ -284,16 +500,6 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
                 {currentStepStatus === 'completed' ? 'Completed' : currentStepStatus === 'running' ? 'Active' : 'Pending'}
               </div>
             </div>
-          </div>
-        </section>
-
-        <section className="rounded-xl border bg-muted/10">
-          <div className="flex items-center justify-between gap-2 px-4 py-3">
-            <div className="text-sm font-medium text-foreground">Step Timeline</div>
-            <div className="text-xs text-muted-foreground">PPT pipeline</div>
-          </div>
-          <div className="px-4 pb-4">
-            <PptPipelineTimeline steps={pptPipeline.steps} />
           </div>
         </section>
       </div>

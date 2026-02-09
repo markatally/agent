@@ -91,31 +91,48 @@ echo -e "${GREEN}  ✓ Prerequisites OK${NC}"
 # Step 2: Start Docker (Colima on macOS)
 echo -e "${YELLOW}[2/7] Checking Docker...${NC}"
 
-# Check if Docker daemon is running
-if ! docker info &> /dev/null; then
-  echo -e "${YELLOW}  Docker not running. Attempting to start...${NC}"
+# Check if Docker daemon is already running
+if docker info &> /dev/null; then
+  echo -e "${GREEN}  ✓ Docker already running (skipping Colima start)${NC}"
+else
+  echo -e "${YELLOW}  Docker not running. Auto-starting...${NC}"
 
   # Try Colima first (macOS)
   if command -v colima &> /dev/null; then
     echo -e "${YELLOW}  Starting Colima...${NC}"
-    colima start 2>/dev/null || true
-    sleep 3
+    colima start || true
+    # Wait for Docker to become ready (poll up to 60s)
+    for i in $(seq 1 30); do
+      sleep 2
+      if docker info &> /dev/null; then
+        break
+      fi
+      if [[ $i -eq 30 ]]; then
+        echo -e "${RED}Error: Colima did not start in time. Please start it manually: colima start${NC}"
+        exit 1
+      fi
+    done
   # Try Docker Desktop
   elif [[ "$OSTYPE" == "darwin"* ]]; then
     echo -e "${YELLOW}  Starting Docker Desktop...${NC}"
     open -a Docker 2>/dev/null || true
-    echo "  Waiting for Docker to start..."
-    sleep 10
-  fi
-
-  # Verify Docker is now running
-  if ! docker info &> /dev/null; then
-    echo -e "${RED}Error: Could not start Docker. Please start it manually.${NC}"
+    for i in $(seq 1 30); do
+      sleep 2
+      if docker info &> /dev/null; then
+        break
+      fi
+      if [[ $i -eq 30 ]]; then
+        echo -e "${RED}Error: Docker did not start in time. Please start Docker Desktop manually.${NC}"
+        exit 1
+      fi
+    done
+  else
+    echo -e "${RED}Error: Docker is not running and no Colima/Docker Desktop found. Please start Docker manually.${NC}"
     exit 1
   fi
-fi
 
-echo -e "${GREEN}  ✓ Docker is running${NC}"
+  echo -e "${GREEN}  ✓ Docker is running${NC}"
+fi
 
 # Step 3: Start PostgreSQL and Redis
 echo -e "${YELLOW}[3/7] Starting database services...${NC}"
@@ -231,7 +248,11 @@ fi
 if $INSTALL_BROWSER; then
   echo -e "${YELLOW}[6b] Installing Playwright Chromium for browser mode...${NC}"
   cd apps/api
-  bunx playwright install chromium
+  if ! bunx playwright install chromium; then
+    cd "$PROJECT_ROOT"
+    echo -e "${YELLOW}  Playwright Chromium install failed. Run manually: cd apps/api && bunx playwright install chromium${NC}"
+    exit 1
+  fi
   cd "$PROJECT_ROOT"
   echo -e "${GREEN}  ✓ Playwright Chromium installed${NC}"
 fi

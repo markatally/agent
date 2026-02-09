@@ -9,6 +9,8 @@ import type {
   InspectorTab,
 } from '@mark/shared';
 import type {
+  AgentStep,
+  AgentStepTimelineState,
   BrowseActivity,
   PptPipelineStep,
   PptStep,
@@ -100,6 +102,8 @@ interface PptPipelineState {
   steps: PptPipelineStep[];
   currentStep?: PptStep;
   browseActivity: BrowseActivity[];
+  /** Set when API sends browser.unavailable (e.g. browser disabled); show key pages from search only */
+  browserUnavailable?: boolean;
 }
 
 const SIDEBAR_OPEN_STORAGE_KEY = 'sidebar-open';
@@ -161,6 +165,8 @@ interface ChatState {
 
   // Browser session state (Computer mode - real browser viewport)
   browserSession: Map<string, BrowserSessionState>;
+  // Unified agent step timeline (Computer mode replay/inspection)
+  agentSteps: Map<string, AgentStepTimelineState>;
 
   // Actions - Messages
   setMessages: (sessionId: string, messages: Message[]) => void;
@@ -223,16 +229,27 @@ interface ChatState {
   startPptPipeline: (sessionId: string, steps: PptPipelineStep[]) => void;
   updatePptStep: (sessionId: string, step: PptStep, status: PptStepStatus) => void;
   addBrowseActivity: (sessionId: string, activity: BrowseActivity) => void;
+  setVisitScreenshot: (sessionId: string, visitIndex: number, screenshotDataUrl: string) => void;
+  setPptBrowserUnavailable: (sessionId: string) => void;
   clearPptPipeline: (sessionId: string) => void;
 
   // Actions - Browser session
   setBrowserLaunched: (sessionId: string) => void;
   setBrowserNavigated: (sessionId: string, url: string, title?: string) => void;
   addBrowserAction: (sessionId: string, action: BrowserAction) => void;
-  setBrowserActionScreenshot: (sessionId: string, screenshotDataUrl: string) => void;
+  setBrowserActionScreenshot: (sessionId: string, screenshotDataUrl: string, actionIndex?: number) => void;
   setBrowserClosed: (sessionId: string) => void;
   setBrowserActionIndex: (sessionId: string, index: number) => void;
   clearBrowserSession: (sessionId: string) => void;
+  appendAgentStep: (sessionId: string, step: Omit<AgentStep, 'stepIndex'> & { stepIndex?: number }) => void;
+  updateAgentStepAt: (sessionId: string, stepIndex: number, updates: Partial<AgentStep>) => void;
+  updateAgentStepSnapshotAt: (
+    sessionId: string,
+    stepIndex: number,
+    updates: Partial<NonNullable<AgentStep['snapshot']>>
+  ) => void;
+  setAgentStepIndex: (sessionId: string, index: number) => void;
+  clearAgentSteps: (sessionId: string) => void;
   loadComputerStateFromStorage: (sessionId: string) => void;
 }
 
@@ -243,6 +260,7 @@ function persistComputerState(get: () => ChatState, sessionId: string) {
       browserSession: state.browserSession.get(sessionId) ?? null,
       pptPipeline: state.pptPipeline.get(sessionId) ?? null,
       isPptTask: state.isPptTask.get(sessionId) ?? false,
+      agentSteps: state.agentSteps.get(sessionId) ?? null,
     };
     localStorage.setItem(COMPUTER_STATE_PREFIX + sessionId, JSON.stringify(data));
   } catch (_) {
@@ -274,6 +292,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pptPipeline: new Map(),
   isPptTask: new Map(),
   browserSession: new Map(),
+  agentSteps: new Map(),
 
   // Set messages for a session
   setMessages: (sessionId: string, messages: Message[]) => {
@@ -489,7 +508,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const durationMs = completedAt - step.startedAt;
         return {
           ...step,
-          status: 'completed',
+          status: 'completed' as const,
           completedAt,
           durationMs,
         };
@@ -719,6 +738,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
     persistComputerState(get, sessionId);
   },
 
+  setVisitScreenshot: (sessionId: string, visitIndex: number, screenshotDataUrl: string) => {
+    set((state) => {
+      const pptPipeline = new Map(state.pptPipeline);
+      const pipeline = pptPipeline.get(sessionId);
+      if (!pipeline) return { pptPipeline };
+      const activity = pipeline.browseActivity;
+      let visitCount = 0;
+      const next = activity.map((a) => {
+        if (a.action !== 'visit') return a;
+        if (visitCount === visitIndex) {
+          visitCount++;
+          return { ...a, screenshotDataUrl };
+        }
+        visitCount++;
+        return a;
+      });
+      pptPipeline.set(sessionId, { ...pipeline, browseActivity: next });
+      return { pptPipeline };
+    });
+    persistComputerState(get, sessionId);
+  },
+
+  setPptBrowserUnavailable: (sessionId: string) => {
+    set((state) => {
+      const pptPipeline = new Map(state.pptPipeline);
+      const pipeline = pptPipeline.get(sessionId);
+      if (!pipeline) return { pptPipeline };
+      pptPipeline.set(sessionId, { ...pipeline, browserUnavailable: true });
+      return { pptPipeline };
+    });
+    persistComputerState(get, sessionId);
+  },
+
   clearPptPipeline: (sessionId: string) => {
     set((state) => {
       const pptPipeline = new Map(state.pptPipeline);
@@ -789,14 +841,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     persistComputerState(get, sessionId);
   },
 
-  setBrowserActionScreenshot: (sessionId: string, screenshotDataUrl: string) => {
+  /** Attach screenshot to an action. When actionIndex is omitted, uses last action (backend must emit browser.action before browser.screenshot). */
+  setBrowserActionScreenshot: (sessionId: string, screenshotDataUrl: string, actionIndex?: number) => {
     set((state) => {
       const browserSession = new Map(state.browserSession);
       const existing = browserSession.get(sessionId);
       if (!existing || existing.actions.length === 0) return state;
       const actions = [...existing.actions];
-      const lastIdx = actions.length - 1;
-      actions[lastIdx] = { ...actions[lastIdx], screenshotDataUrl };
+      const idx =
+        typeof actionIndex === 'number' && actionIndex >= 0 && actionIndex < actions.length
+          ? actionIndex
+          : actions.length - 1;
+      actions[idx] = { ...actions[idx], screenshotDataUrl };
       browserSession.set(sessionId, { ...existing, actions });
       return { browserSession };
     });
@@ -826,6 +882,91 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
+  appendAgentStep: (sessionId: string, step: Omit<AgentStep, 'stepIndex'> & { stepIndex?: number }) => {
+    set((state) => {
+      const agentSteps = new Map(state.agentSteps);
+      const existing = agentSteps.get(sessionId) ?? { steps: [], currentStepIndex: 0 };
+      const stepIndex =
+        typeof step.stepIndex === 'number' && step.stepIndex >= 0
+          ? step.stepIndex
+          : existing.steps.length;
+      const nextStep: AgentStep = { ...step, stepIndex };
+      const steps = [...existing.steps];
+
+      if (stepIndex < steps.length) {
+        steps[stepIndex] = { ...steps[stepIndex], ...nextStep };
+      } else {
+        steps.push(nextStep);
+      }
+
+      agentSteps.set(sessionId, {
+        steps,
+        currentStepIndex: Math.max(0, steps.length - 1),
+      });
+      return { agentSteps };
+    });
+    persistComputerState(get, sessionId);
+  },
+
+  updateAgentStepAt: (sessionId: string, stepIndex: number, updates: Partial<AgentStep>) => {
+    set((state) => {
+      const agentSteps = new Map(state.agentSteps);
+      const existing = agentSteps.get(sessionId);
+      if (!existing || stepIndex < 0 || stepIndex >= existing.steps.length) return state;
+      const steps = [...existing.steps];
+      steps[stepIndex] = { ...steps[stepIndex], ...updates, stepIndex };
+      agentSteps.set(sessionId, { ...existing, steps });
+      return { agentSteps };
+    });
+    persistComputerState(get, sessionId);
+  },
+
+  updateAgentStepSnapshotAt: (
+    sessionId: string,
+    stepIndex: number,
+    updates: Partial<NonNullable<AgentStep['snapshot']>>
+  ) => {
+    set((state) => {
+      const agentSteps = new Map(state.agentSteps);
+      const existing = agentSteps.get(sessionId);
+      if (!existing || stepIndex < 0 || stepIndex >= existing.steps.length) return state;
+      const steps = [...existing.steps];
+      const target = steps[stepIndex];
+      const prevSnapshot = target.snapshot ?? {
+        stepIndex,
+        timestamp: Date.now(),
+      };
+      steps[stepIndex] = {
+        ...target,
+        snapshot: { ...prevSnapshot, ...updates, stepIndex },
+      };
+      agentSteps.set(sessionId, { ...existing, steps });
+      return { agentSteps };
+    });
+    persistComputerState(get, sessionId);
+  },
+
+  setAgentStepIndex: (sessionId: string, index: number) => {
+    set((state) => {
+      const agentSteps = new Map(state.agentSteps);
+      const existing = agentSteps.get(sessionId);
+      if (!existing) return state;
+      const clamped = Math.max(0, Math.min(index, Math.max(0, existing.steps.length - 1)));
+      agentSteps.set(sessionId, { ...existing, currentStepIndex: clamped });
+      return { agentSteps };
+    });
+    persistComputerState(get, sessionId);
+  },
+
+  clearAgentSteps: (sessionId: string) => {
+    set((state) => {
+      const agentSteps = new Map(state.agentSteps);
+      agentSteps.delete(sessionId);
+      return { agentSteps };
+    });
+    persistComputerState(get, sessionId);
+  },
+
   clearBrowserSession: (sessionId: string) => {
     set((state) => {
       const browserSession = new Map(state.browserSession);
@@ -843,6 +984,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         browserSession?: BrowserSessionState | null;
         pptPipeline?: PptPipelineState | null;
         isPptTask?: boolean;
+        agentSteps?: AgentStepTimelineState | null;
       };
       set((state) => {
         const next: Partial<ChatState> = {};
@@ -860,6 +1002,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const isPptTask = new Map(state.isPptTask);
           isPptTask.set(sessionId, data.isPptTask);
           next.isPptTask = isPptTask;
+        }
+        if (data.agentSteps != null) {
+          const agentSteps = new Map(state.agentSteps);
+          agentSteps.set(sessionId, data.agentSteps);
+          next.agentSteps = agentSteps;
         }
         return next;
       });

@@ -1,3 +1,5 @@
+import type { BrowserAction } from '@mark/shared';
+
 // Re-export all shared types from @mark/shared
 export * from '@mark/shared';
 
@@ -81,6 +83,8 @@ export type StreamEventType =
   | 'browser.action'
   | 'browser.screenshot'
   | 'browser.closed'
+  | 'browser.unavailable'
+  | 'browse.screenshot'
   | 'error';
 
 export type PptStep =
@@ -105,6 +109,8 @@ export interface BrowseActivity {
   title?: string;
   query?: string;
   timestamp: number;
+  /** Optional screenshot data URL for visit steps (from backend browse.screenshot) */
+  screenshotDataUrl?: string;
 }
 
 /** Browser session state for Computer mode (real browser viewport) */
@@ -115,6 +121,29 @@ export interface BrowserSessionState {
   status: 'idle' | 'launching' | 'active' | 'closed';
   actions: BrowserAction[];
   currentActionIndex: number;
+}
+
+export interface StepSnapshot {
+  stepIndex: number;
+  timestamp: number;
+  url?: string;
+  screenshot?: string;
+  metadata?: {
+    actionDescription?: string;
+    domSummary?: string;
+  };
+}
+
+export interface AgentStep {
+  stepIndex: number;
+  type: 'browse' | 'search' | 'tool' | 'finalize';
+  snapshot?: StepSnapshot;
+  output?: string;
+}
+
+export interface AgentStepTimelineState {
+  steps: AgentStep[];
+  currentStepIndex: number;
 }
 
 /**

@@ -494,7 +494,15 @@ export class TaskManager {
       return '';
     }
 
-    let context = `Task Goal: ${state.goal.description}\n`;
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    let context = `Current date: ${dateStr}. Use this date when interpreting "this year", "recent", "newly released", or publication dates. Papers and content from the current year do exist and can be found via search (e.g. arXiv has papers from ${now.getFullYear()}). Do NOT assume the current year is in the past.\n\n`;
+    context += `Task Goal: ${state.goal.description}\n`;
     context += `Phase: ${state.phase}\n`;
     context += `Execution Plan:\n`;
 
@@ -518,7 +526,8 @@ export class TaskManager {
     context += `- When user asks about progress, report current state WITHOUT making new tool calls\n`;
     context += `- web_search and paper_search are high-cost tools: call them AT MOST ONCE per task\n`;
     context += `- After searching, proceed using existing results\n`;
-    context += `- If search results are insufficient, do your best with available information\n`;
+    context += `- Never silently relax explicit user constraints (year, date range, source URL)\n`;
+    context += `- If constrained search has zero results, report the evidence gap instead of changing scope\n`;
     context += `- Do NOT explain internal tool limitations to the user\n`;
 
     return context;

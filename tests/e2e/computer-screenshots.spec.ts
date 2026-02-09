@@ -82,7 +82,7 @@ test.describe('Computer tab and step screenshots', () => {
 
     const placeholder = page.locator('[data-testid="computer-viewport-placeholder"]');
     await expect(placeholder).toBeVisible({ timeout: 15000 });
-    await expect(placeholder.getByText(/Screenshots of each step will appear here/i)).toBeVisible();
+    await expect(placeholder.getByText(/No visual steps yet|Snapshot unavailable for this step/i)).toBeVisible();
 
     const screenshotImg = page.locator('[data-testid="browser-viewport-screenshot"]');
     await expect(screenshotImg).toBeVisible({ timeout: 90000 });

@@ -41,6 +41,9 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
   const browserSessionActive = useChatStore((state) =>
     sessionId ? (state.browserSession.get(sessionId)?.active ?? false) : false
   );
+  const hasAgentSteps = useChatStore((state) =>
+    sessionId ? (state.agentSteps.get(sessionId)?.steps.length ?? 0) > 0 : false
+  );
   const [width, setWidth] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored
@@ -110,7 +113,8 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
       executionSteps.length > 0 ||
       sandboxFiles.length > 0 ||
       isPptTask ||
-      browserSessionActive);
+      browserSessionActive ||
+      hasAgentSteps);
 
   return (
     <aside
@@ -191,7 +195,7 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
                     <ReasoningTrace sessionId={sessionId} selectedMessageId={selectedMessageId} />
                   </TabsContent>
 
-                  <TabsContent value="computer" className="min-w-0">
+                  <TabsContent value="computer" className="flex h-full min-h-0 min-w-0 flex-col">
                     <ComputerPanel sessionId={sessionId} />
                   </TabsContent>
                 </div>

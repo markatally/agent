@@ -63,12 +63,17 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const startPptPipeline = useChatStore((state) => state.startPptPipeline);
   const updatePptStep = useChatStore((state) => state.updatePptStep);
   const addBrowseActivity = useChatStore((state) => state.addBrowseActivity);
+  const setVisitScreenshot = useChatStore((state) => state.setVisitScreenshot);
+  const setPptBrowserUnavailable = useChatStore((state) => state.setPptBrowserUnavailable);
   const setBrowserLaunched = useChatStore((state) => state.setBrowserLaunched);
   const setBrowserNavigated = useChatStore((state) => state.setBrowserNavigated);
   const addBrowserAction = useChatStore((state) => state.addBrowserAction);
   const setBrowserActionScreenshot = useChatStore((state) => state.setBrowserActionScreenshot);
   const setBrowserClosed = useChatStore((state) => state.setBrowserClosed);
   const clearBrowserSession = useChatStore((state) => state.clearBrowserSession);
+  const appendAgentStep = useChatStore((state) => state.appendAgentStep);
+  const updateAgentStepSnapshotAt = useChatStore((state) => state.updateAgentStepSnapshotAt);
+  const clearAgentSteps = useChatStore((state) => state.clearAgentSteps);
   const clearFiles = useChatStore((state) => state.clearFiles);
   const loadComputerStateFromStorage = useChatStore((state) => state.loadComputerStateFromStorage);
 
@@ -100,6 +105,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
         startStreaming(sessionId);
         clearReasoningSteps(sessionId);
         clearBrowserSession(sessionId);
+        clearAgentSteps(sessionId);
         break;
 
       case 'message.delta':
@@ -220,6 +226,17 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       case 'ppt.pipeline.start':
         if (event.data?.steps) {
           startPptPipeline(sessionId, event.data.steps);
+          appendAgentStep(sessionId, {
+            type: 'tool',
+            output: 'PPT pipeline started',
+            snapshot: {
+              stepIndex: 0,
+              timestamp: Date.now(),
+              metadata: {
+                actionDescription: 'Pipeline initialization',
+              },
+            },
+          });
           setInspectorTab('computer');
           setInspectorOpen(true);
         }
@@ -234,6 +251,50 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       case 'browse.activity':
         if (event.data?.action) {
           addBrowseActivity(sessionId, event.data);
+          const action = event.data.action as 'search' | 'visit' | 'read';
+          appendAgentStep(sessionId, {
+            type: action === 'search' ? 'search' : 'browse',
+            output:
+              action === 'search'
+                ? event.data.query || 'Search'
+                : event.data.title || event.data.url || action,
+            snapshot: {
+              stepIndex: 0,
+              timestamp:
+                typeof event.data.timestamp === 'number' ? event.data.timestamp : Date.now(),
+              url: event.data.url,
+              metadata: {
+                actionDescription:
+                  action === 'search'
+                    ? `Search: ${event.data.query || ''}`.trim()
+                    : action === 'visit'
+                      ? 'Visit page'
+                      : 'Read page',
+              },
+            },
+          });
+        }
+        break;
+
+      case 'browse.screenshot':
+        if (event.data?.screenshot != null && typeof event.data.visitIndex === 'number') {
+          const dataUrl = `data:image/jpeg;base64,${event.data.screenshot}`;
+          setVisitScreenshot(sessionId, event.data.visitIndex, dataUrl);
+          const timeline = useChatStore.getState().agentSteps.get(sessionId);
+          if (timeline?.steps?.length) {
+            const visitSteps = timeline.steps.filter(
+              (step) =>
+                step.type === 'browse' &&
+                (step.snapshot?.metadata?.actionDescription === 'Visit page' ||
+                  step.snapshot?.metadata?.actionDescription === 'Read page')
+            );
+            const visitStep = visitSteps[event.data.visitIndex];
+            if (visitStep) {
+              updateAgentStepSnapshotAt(sessionId, visitStep.stepIndex, {
+                screenshot: dataUrl,
+              });
+            }
+          }
         }
         break;
 
@@ -251,7 +312,8 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
 
       case 'browser.action':
         if (event.data?.action) {
-          const actionType = (event.data.action as string).replace('browser_', '') as
+          const actionName = event.data.action as string;
+          const actionType = actionName.replace('browser_', '') as
             | 'navigate'
             | 'click'
             | 'type'
@@ -259,6 +321,9 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
             | 'wait'
             | 'extract'
             | 'screenshot';
+          const actionUrl =
+            event.data.params?.url ||
+            useChatStore.getState().browserSession.get(sessionId)?.currentUrl;
           addBrowserAction(sessionId, {
             id: `browser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             type: actionType,
@@ -267,20 +332,73 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
             text: event.data.params?.text,
             timestamp: Date.now(),
           });
+          appendAgentStep(sessionId, {
+            type: 'browse',
+            output: event.data.output || event.data.error || actionName,
+            snapshot: {
+              stepIndex: 0,
+              timestamp: Date.now(),
+              url: actionUrl,
+              metadata: {
+                actionDescription: `Browser action: ${actionType}`,
+                domSummary: event.data.output,
+              },
+            },
+          });
         }
         break;
 
       case 'browser.screenshot':
         if (event.data?.screenshot) {
+          const actionIndex =
+            typeof event.data.actionIndex === 'number' ? event.data.actionIndex : undefined;
+          const dataUrl = `data:image/jpeg;base64,${event.data.screenshot}`;
           setBrowserActionScreenshot(
             sessionId,
-            `data:image/jpeg;base64,${event.data.screenshot}`
+            dataUrl,
+            actionIndex
           );
+          if (typeof actionIndex === 'number') {
+            const timeline = useChatStore.getState().agentSteps.get(sessionId);
+            if (timeline?.steps?.length) {
+              const browserSteps = timeline.steps.filter(
+                (step) =>
+                  step.type === 'browse' &&
+                  step.snapshot?.metadata?.actionDescription?.startsWith('Browser action:')
+              );
+              const target = browserSteps[actionIndex];
+              if (target) {
+                updateAgentStepSnapshotAt(sessionId, target.stepIndex, { screenshot: dataUrl });
+              }
+            }
+          } else {
+            const timeline = useChatStore.getState().agentSteps.get(sessionId);
+            if (timeline && timeline.steps.length > 0) {
+              updateAgentStepSnapshotAt(sessionId, timeline.steps.length - 1, {
+                screenshot: dataUrl,
+              });
+            }
+          }
         }
+        break;
+
+      case 'browser.unavailable':
+        setPptBrowserUnavailable(sessionId);
         break;
 
       case 'browser.closed':
         setBrowserClosed(sessionId);
+        appendAgentStep(sessionId, {
+          type: 'finalize',
+          output: 'Browser session closed',
+          snapshot: {
+            stepIndex: 0,
+            timestamp: Date.now(),
+            metadata: {
+              actionDescription: 'Browser closed',
+            },
+          },
+        });
         break;
 
       case 'inspector.focus':

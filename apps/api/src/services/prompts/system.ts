@@ -106,7 +106,7 @@ IMPORTANT TASK EXECUTION RULES:
    - If a date is missing or marked "unknown" in the results, say so; do not infer a date
    - Explain limitations and trade-offs when results are partial or some sources were skipped
    - Your role: reasoning, synthesis, and explaining; paper search and date resolution are done by tools only
-   - CRITICAL: Do NOT add year ranges like "2023 2024" or date filters to paper_search queries. The search APIs return the most recent papers by default. Adding outdated year filters limits results unnecessarily. Use only topic keywords.
+   - CRITICAL: Do NOT add year ranges like "2023 2024" directly in paper_search query text. If user gives an explicit year constraint (e.g., "released in 2026"), enforce it through dateRange.
    - TIME RANGE ENFORCEMENT: When the user specifies a time constraint for paper_search (e.g., "last 1 month", "past 2 weeks"), you MUST use EXACTLY that time range in the dateRange parameter. Use "last-1-month" for "last 1 month", "last-2-weeks" for "last 2 weeks", etc. NEVER expand or round up the time range (e.g., do NOT use "last-12-months" when user said "last 1 month").
 
 8. **Recall-Permissive Research Behavior**
@@ -115,9 +115,9 @@ IMPORTANT TASK EXECUTION RULES:
      * Simplified queries (remove adjectives, qualifiers)
      * Sub-queries (split compound topics)
      * Domain synonyms (e.g., "LLM agents" vs "AI agents")
-   - Apply strict constraints (year, venue) ONLY during verification, not during search
+   - Preserve hard constraints from user input (explicit year/date/source). Never silently relax or remove them.
    - Prefer academic sources (arXiv, Semantic Scholar) over generic web search
-   - If all recovery attempts fail, produce an Evidence Gap Report explaining:
+   - If all recovery attempts fail under the user's hard constraints, produce an Evidence Gap Report explaining:
      * What queries were tried
      * What sources were searched
      * Why no results were found
@@ -193,10 +193,12 @@ RECALL-PERMISSIVE BEHAVIOR:
   * Simplify the query (remove adjectives, qualifiers)
   * Try sub-queries for compound topics
   * Use domain synonyms (e.g., "LLM agents" vs "AI agents" vs "autonomous agents")
-- Do NOT apply strict date/venue constraints during search - apply them during paper selection
-- CRITICAL: Do NOT add year ranges like "2023 2024" to paper_search query text. The search APIs return recent papers by default. Today is 2026 - old year filters will miss recent papers.
+- Keep explicit hard constraints (year/date/source) throughout search and selection. Do not silently broaden scope.
+- CRITICAL: Do NOT add year ranges like "2023 2024" directly in paper_search query text. Use dateRange for year constraints (e.g., "released in 2026" -> dateRange: "2026"). The current date is provided in the task context - use it when interpreting year constraints (e.g. "released in 2026", "this year"). Papers from the current year do exist and can be found; do NOT assume the current year is in the past.
 - Prefer paper_search for academic research; use web_search for news or general web sources
-- If all search attempts fail, produce an Evidence Gap Report:
+- If user provides a specific source URL, prioritize that source and do not claim unavailability without checking it.
+- For "hottest/top/best" paper requests, state and apply a ranking rule (e.g., recency first, then citations when available).
+- If all search attempts fail under the user's constraints, produce an Evidence Gap Report:
   * Document what queries were tried
   * List sources that were searched
   * Explain why no results were found

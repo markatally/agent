@@ -24,6 +24,7 @@ import {
   intentToAbsoluteDateWindow,
   isStrictTimeRange,
   describeTimeWindow,
+  validateTimeRange,
 } from '../paper-search/time-range-parser';
 
 type SearchSource = 'arxiv' | 'semantic_scholar' | 'all';
@@ -35,6 +36,73 @@ const SOURCE_TO_SKILL_IDS: Record<SearchSource, string[]> = {
 };
 
 type PaperSearchOrchestrator = ReturnType<typeof createPaperSearchOrchestrator>;
+type TimeAwareAbsoluteDateWindow = AbsoluteDateWindow & {
+  intent?: {
+    unit?: 'days' | 'weeks' | 'months' | 'years' | 'absolute';
+    originalExpression?: string;
+    startYear?: number;
+    endYear?: number;
+  };
+};
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sanitizeQueryWithTimeIntent(
+  originalQuery: string,
+  absoluteDateWindow?: TimeAwareAbsoluteDateWindow
+): string {
+  if (!absoluteDateWindow?.intent) {
+    return originalQuery;
+  }
+
+  let cleaned = originalQuery;
+  const expression = absoluteDateWindow.intent.originalExpression;
+  if (expression) {
+    cleaned = cleaned.replace(new RegExp(escapeRegExp(expression), 'gi'), ' ');
+  }
+
+  // If the user specified an absolute year/year-range, remove raw year tokens from query text.
+  // Year filtering should happen through dateRange, not keyword matching against "2026".
+  if (absoluteDateWindow.intent.unit === 'absolute') {
+    const years = new Set<number>();
+    if (absoluteDateWindow.intent.startYear != null) years.add(absoluteDateWindow.intent.startYear);
+    if (absoluteDateWindow.intent.endYear != null) years.add(absoluteDateWindow.intent.endYear);
+    for (const year of years) {
+      cleaned = cleaned.replace(new RegExp(`\\b${year}\\b`, 'g'), ' ');
+    }
+  }
+
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned || originalQuery;
+}
+
+function inferRankingRule(
+  query: string,
+  explicitSortBy?: string
+): { sortBy: 'relevance' | 'date' | 'citations'; rankingRule: string } {
+  if (explicitSortBy === 'date' || explicitSortBy === 'citations' || explicitSortBy === 'relevance') {
+    return {
+      sortBy: explicitSortBy,
+      rankingRule: `explicit sortBy=${explicitSortBy}`,
+    };
+  }
+
+  const lower = query.toLowerCase();
+  const hottestPattern = /\b(hottest|top|best|most influential|most impactful|most popular)\b/;
+  if (hottestPattern.test(lower)) {
+    return {
+      sortBy: 'date',
+      rankingRule: 'inferred hottest/top intent: rank by recency first',
+    };
+  }
+
+  return {
+    sortBy: 'relevance',
+    rankingRule: 'default relevance ranking',
+  };
+}
 
 export class PaperSearchTool implements Tool {
   name = 'paper_search';
@@ -114,8 +182,10 @@ export class PaperSearchTool implements Tool {
         Math.max(Number.isFinite(parsedTopK) ? parsedTopK : 5, 1),
         20
       );
-      const sortBy = (params.sortBy as string) || 'relevance';
-      const dateRange = params.dateRange as string | undefined;
+      const sortByParam = params.sortBy as string | undefined;
+      const ranking = inferRankingRule(query, sortByParam);
+      const sortBy = ranking.sortBy;
+      let dateRange = params.dateRange as string | undefined;
       const enableRetry = params.enableRetry !== false;
       const maxRetries = Math.min(Math.max(Number(params.maxRetries) || 2, 0), 5);
 
@@ -133,21 +203,38 @@ export class PaperSearchTool implements Tool {
       // WHY: Convert relative time ("last 1 month") to absolute dates ONCE
       // This prevents time-range drift during retries
       // ============================================================
-      let absoluteDateWindow: AbsoluteDateWindow | undefined;
+      let absoluteDateWindow: TimeAwareAbsoluteDateWindow | undefined;
       if (dateRange) {
         const intent = parseDateRangeString(dateRange);
         absoluteDateWindow = intent ? intentToAbsoluteDateWindow(intent) : undefined;
-        if (absoluteDateWindow) {
-          console.log(`[PaperSearchTool] Time range parsed: ${describeTimeWindow(absoluteDateWindow)}`);
+      } else {
+        // If model omitted dateRange but user query contains explicit time constraints
+        // (e.g., "released in 2026"), infer and enforce it automatically.
+        const inferred = validateTimeRange(query);
+        absoluteDateWindow = inferred.absoluteDateWindow;
+        if (absoluteDateWindow?.intent?.unit === 'absolute' && absoluteDateWindow.intent.startYear != null) {
+          if (
+            absoluteDateWindow.intent.endYear != null &&
+            absoluteDateWindow.intent.endYear !== absoluteDateWindow.intent.startYear
+          ) {
+            dateRange = `${absoluteDateWindow.intent.startYear}-${absoluteDateWindow.intent.endYear}`;
+          } else {
+            dateRange = String(absoluteDateWindow.intent.startYear);
+          }
         }
       }
+      if (absoluteDateWindow) {
+        console.log(`[PaperSearchTool] Time range parsed: ${describeTimeWindow(absoluteDateWindow)}`);
+      }
+
+      const searchQuery = sanitizeQueryWithTimeIntent(query, absoluteDateWindow);
 
       onProgress?.(0, 100, 'Preparing search...');
       const skillIds = SOURCE_TO_SKILL_IDS[sourcesParam] ?? DEFAULT_PAPER_SEARCH_SKILL_IDS;
 
       onProgress?.(10, 100, `Searching ${skillIds.length} source(s)...`);
       let out = await this.runOrchestrator({
-        query,
+        query: searchQuery,
         skillIds,
         limit: topK,
         sortBy: sortBy as 'relevance' | 'date' | 'citations',
@@ -180,7 +267,7 @@ export class PaperSearchTool implements Tool {
           const retryDateWindow = isStrict ? absoluteDateWindow : (usedFallback ? undefined : absoluteDateWindow);
 
           const next = await this.runOrchestrator({
-            query: q,
+            query: sanitizeQueryWithTimeIntent(q, absoluteDateWindow),
             skillIds,
             limit: topK,
             sortBy: sortBy as 'relevance' | 'date' | 'citations',
@@ -253,6 +340,7 @@ export class PaperSearchTool implements Tool {
       // rather than treating it as a fatal failure
       const artifactPayload = {
         query,
+        searchQuery,
         originalQuery: query,
         sources: skillIds,
         sourcesQueried: out.sourcesQueried,
@@ -261,6 +349,7 @@ export class PaperSearchTool implements Tool {
         usedFallback,
         sortBy,
         topK,
+        rankingRule: ranking.rankingRule,
         results: papers,
         exclusionReasons: out.exclusionReasons,
         // Time range enforcement metadata

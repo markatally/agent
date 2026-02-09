@@ -69,6 +69,24 @@ describe('Time Range Parser', () => {
       expect(result?.startYear).toBe(2024);
       expect(result?.startMonth).toBe(0); // January is 0
     });
+
+    it('should parse explicit single year constraints', () => {
+      const result = parseTimeRangeFromInput('Find time series papers released in 2026');
+      expect(result).toBeDefined();
+      expect(result?.unit).toBe('absolute');
+      expect(result?.startYear).toBe(2026);
+      expect(result?.endYear).toBe(2026);
+      expect(result?.strict).toBe(true);
+    });
+
+    it('should parse explicit year ranges in natural language', () => {
+      const result = parseTimeRangeFromInput('Research between 2024 and 2026');
+      expect(result).toBeDefined();
+      expect(result?.unit).toBe('absolute');
+      expect(result?.startYear).toBe(2024);
+      expect(result?.endYear).toBe(2026);
+      expect(result?.strict).toBe(true);
+    });
     
     it('should parse "recent papers" as flexible pattern', () => {
       const result = parseTimeRangeFromInput('Find recent papers on AI');

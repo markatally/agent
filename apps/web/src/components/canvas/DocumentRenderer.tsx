@@ -208,14 +208,7 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
         })}
 
         {showStreamingContent ? (
-          <div
-            className={cn(
-              'rounded-lg transition-all duration-150',
-              !selectedMessageId && 'ring-2 ring-primary/30 bg-muted/30'
-            )}
-          >
-            <ContentBlock content={streamingContent} isStreaming={true} />
-          </div>
+          <ContentBlock content={streamingContent} isStreaming={true} />
         ) : null}
 
         {isThinkingThisSession && !showStreamingContent ? (

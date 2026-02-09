@@ -11,6 +11,10 @@ interface TimelineScrubberProps {
   onJumpToLive: () => void;
   onSeek?: (index: number) => void;
   className?: string;
+  /** Show "Back" / "Forward" labels next to step buttons (default true for discoverability) */
+  showBackForwardLabels?: boolean;
+  /** Label for the step counter, e.g. "Page" or "Step" (default "Step") */
+  stepLabel?: string;
 }
 
 /**
@@ -25,15 +29,19 @@ export function TimelineScrubber({
   onJumpToLive,
   onSeek,
   className,
+  showBackForwardLabels = true,
+  stepLabel = 'Step',
 }: TimelineScrubberProps) {
   const total = Math.max(1, totalSteps);
   const value = totalSteps === 0 ? 0 : currentIndex;
+  const atStart = value <= 0;
+  const atEnd = totalSteps === 0 || value >= total - 1;
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">
-          Step {value + 1} of {total}
+          {stepLabel} {value + 1} of {total}
         </span>
         {!isLive && (
           <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onJumpToLive}>
@@ -54,19 +62,20 @@ export function TimelineScrubber({
           className="h-8 w-8 shrink-0"
           onClick={() => onSeek?.(0)}
           disabled={totalSteps === 0}
-          aria-label="Go to start"
+          aria-label="Go to first step"
         >
           <ChevronsLeft className="h-4 w-4" />
         </Button>
         <Button
           variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0"
+          size={showBackForwardLabels ? 'default' : 'icon'}
+          className={cn('shrink-0', showBackForwardLabels && 'gap-1 px-2')}
           onClick={onPrevious}
-          disabled={totalSteps === 0}
-          aria-label="Previous step"
+          disabled={totalSteps === 0 || atStart}
+          aria-label="Back (previous step)"
         >
           <ChevronLeft className="h-4 w-4" />
+          {showBackForwardLabels && <span className="text-xs">Back</span>}
         </Button>
         <div className="flex-1 px-2">
           <input
@@ -76,16 +85,18 @@ export function TimelineScrubber({
             value={value}
             onChange={(e) => onSeek?.(e.target.valueAsNumber)}
             className="h-2 w-full cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+            aria-label={`Select ${stepLabel.toLowerCase()} to view`}
           />
         </div>
         <Button
           variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0"
+          size={showBackForwardLabels ? 'default' : 'icon'}
+          className={cn('shrink-0', showBackForwardLabels && 'gap-1 px-2')}
           onClick={onNext}
-          disabled={totalSteps === 0}
-          aria-label="Next step"
+          disabled={totalSteps === 0 || atEnd}
+          aria-label="Forward (next step)"
         >
+          {showBackForwardLabels && <span className="text-xs">Forward</span>}
           <ChevronRight className="h-4 w-4" />
         </Button>
         <Button
@@ -94,7 +105,7 @@ export function TimelineScrubber({
           className="h-8 w-8 shrink-0"
           onClick={() => onSeek?.(total - 1)}
           disabled={totalSteps === 0}
-          aria-label="Go to end"
+          aria-label="Go to last step"
         >
           <ChevronsRight className="h-4 w-4" />
         </Button>

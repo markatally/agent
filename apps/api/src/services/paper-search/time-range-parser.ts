@@ -70,6 +70,33 @@ const STRICT_TIME_PATTERNS: Array<{
   pattern: RegExp;
   extract: (match: RegExpMatchArray) => TimeRangeIntent;
 }> = [
+  // "between 2025 and 2026", "from 2025 to 2026"
+  {
+    pattern: /\b(?:between|from)\s+(20\d{2})\s+(?:and|to)\s+(20\d{2})\b/i,
+    extract: (m) => ({
+      unit: 'absolute',
+      strict: true,
+      startYear: parseInt(m[1], 10),
+      endYear: parseInt(m[2], 10),
+      startMonth: 0,
+      endMonth: 11,
+    }),
+  },
+  // "in 2026", "during 2026", "released in 2026", "published in 2026"
+  {
+    pattern: /\b(?:in|during|released in|published in)\s+(20\d{2})\b/i,
+    extract: (m) => {
+      const year = parseInt(m[1], 10);
+      return {
+        unit: 'absolute',
+        strict: true,
+        startYear: year,
+        endYear: year,
+        startMonth: 0,
+        endMonth: 11,
+      };
+    },
+  },
   // "last N month(s)", "past N month(s)", "recent N month(s)"
   {
     pattern: /(?:last|past|recent|within(?: the)?)\s+(\d+)\s*(month|months)/i,

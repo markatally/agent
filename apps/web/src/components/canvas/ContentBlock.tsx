@@ -200,7 +200,10 @@ export function ContentBlock({ content, isStreaming }: ContentBlockProps) {
   const hasMarkdownTables = parsedContent?.hasTables ?? false;
 
   return (
-    <div className="prose prose-neutral dark:prose-invert max-w-none" data-testid="assistant-message">
+    <div
+      className="prose prose-neutral dark:prose-invert max-w-none border-0 shadow-none bg-transparent"
+      data-testid="assistant-message"
+    >
       {hasExplicitTableBlocks ? (
         explicitTableSegments.map((segment, index) =>
           segment.type === 'table' ? (

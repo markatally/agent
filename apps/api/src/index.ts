@@ -31,6 +31,15 @@ app.use(
   })
 );
 
+// Root: avoid GET / hitting 404 and ensure native Response for adapters (e.g. Bun)
+app.get('/', (c) => {
+  return c.json({
+    name: 'Mark Agent API',
+    version: '0.1.0',
+    docs: '/api/health',
+  });
+});
+
 // Health check
 app.get('/api/health', (c) => {
   return c.json({
@@ -52,23 +61,28 @@ app.route('/api/external-skills', externalSkillRoutes);
 app.route('/api/user-skills', userSkillRoutes); // User skill preferences
 app.route('/api/public', publicDownloadRoutes); // Public download with token
 
-// 404 handler
+// 404 handler: return native Response so runtimes (e.g. Bun) that expect Response don't throw
 app.notFound((c) => {
-  return c.json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }, 404);
+  const body = JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
+  return new Response(body, {
+    status: 404,
+    headers: { 'Content-Type': 'application/json' },
+  });
 });
 
-// Error handler
+// Error handler: same — return native Response for adapter compatibility
 app.onError((err, c) => {
   console.error('Unhandled error:', err);
-  return c.json(
-    {
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
-      },
+  const body = JSON.stringify({
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
     },
-    500
-  );
+  });
+  return new Response(body, {
+    status: 500,
+    headers: { 'Content-Type': 'application/json' },
+  });
 });
 
 // Start server only when run directly (not when imported by tests)

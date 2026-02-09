@@ -108,6 +108,9 @@ const inferFocusTab = (
  * 1. LLM generates response (with or without tool calls)
  * 2. If tool calls: execute tools, add results to history, RECALL LLM
  * 3. If no tool calls: final answer, save and return
+ *
+ * When PPT pipeline is enabled, callers pass activeStream (PptPipelineController.wrapStream(sseStream))
+ * so that tool.complete and other events are seen by the pipeline and can trigger navigateToResults.
  */
 async function processAgentTurn(
   sessionId: string,

@@ -114,6 +114,8 @@ Edit `config/default.json` to customize:
 - Tool permissions
 - Security settings
 
+**Browser mode (Computer tab / PPT screenshots):** To use webpage screenshots during PPT or browsing, install Playwright browsers: run `scripts/start.sh --INSTALL_BROWSER` or from `apps/api` run `npx playwright install chromium`.
+
 ## Docker Deployment
 
 ```bash
