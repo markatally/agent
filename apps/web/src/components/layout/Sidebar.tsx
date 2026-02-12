@@ -1,11 +1,30 @@
-import { LogOut, Menu, X, GripVertical, PanelLeftClose } from 'lucide-react';
+import { ChevronsUpDown, GripVertical, Loader2, Menu, PanelLeftClose, X } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useClearAllSessions } from '../../hooks/useSessions';
 import { Button } from '../ui/button';
 import { Separator } from '../ui/separator';
 import { SessionList } from '../session/SessionList';
 import { NewSessionButton } from '../session/NewSessionButton';
 import { cn } from '../../lib/utils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
@@ -18,11 +37,20 @@ interface SidebarProps {
   className?: string;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  onOpenSkillsConfig?: () => void;
 }
 
-export function Sidebar({ className, collapsed = false, onToggleCollapse }: SidebarProps) {
+export function Sidebar({
+  className,
+  collapsed = false,
+  onToggleCollapse,
+  onOpenSkillsConfig,
+}: SidebarProps) {
   const { user, logout } = useAuth();
+  const clearAllSessions = useClearAllSessions();
+  const navigate = useNavigate();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [showClearAllDialog, setShowClearAllDialog] = useState(false);
   const [width, setWidth] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored ? clampSidebarWidth(parseInt(stored, 10)) : DEFAULT_SIDEBAR_WIDTH;
@@ -65,6 +93,27 @@ export function Sidebar({ className, collapsed = false, onToggleCollapse }: Side
       document.body.style.userSelect = '';
     };
   }, [isResizing, handleMouseMove, handleMouseUp]);
+
+  const handleLogout = useCallback(() => {
+    logout();
+    setIsMobileOpen(false);
+  }, [logout]);
+
+  const handleOpenSkillsConfig = useCallback(() => {
+    onOpenSkillsConfig?.();
+    setIsMobileOpen(false);
+  }, [onOpenSkillsConfig]);
+
+  const handleClearAllConversations = useCallback(async () => {
+    try {
+      await clearAllSessions.mutateAsync();
+      setShowClearAllDialog(false);
+      navigate('/chat');
+      setIsMobileOpen(false);
+    } catch {
+      // Toast handled by mutation
+    }
+  }, [clearAllSessions, navigate]);
 
   return (
     <>
@@ -122,20 +171,51 @@ export function Sidebar({ className, collapsed = false, onToggleCollapse }: Side
 
         {/* User Menu */}
         <div className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1 overflow-hidden">
-              <p className="truncate text-sm font-medium">{user?.email}</p>
-              <p className="text-xs text-muted-foreground">Signed in</p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={logout}
-              title="Log out"
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className="h-auto w-full items-center justify-between rounded-lg px-3 py-2 text-left hover:bg-accent data-[state=open]:bg-accent"
+              >
+                <div className="flex-1 overflow-hidden">
+                  <p className="truncate text-sm font-medium">{user?.email}</p>
+                  <p className="text-xs text-muted-foreground">Signed in</p>
+                </div>
+                <ChevronsUpDown className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              side="top"
+              sideOffset={8}
+              className="w-[var(--radix-dropdown-menu-trigger-width)]"
             >
-              <LogOut className="h-4 w-4" />
-            </Button>
-          </div>
+              <DropdownMenuItem onClick={handleLogout}>
+                Logout
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setShowClearAllDialog(true);
+                }}
+                disabled={clearAllSessions.isPending}
+                className="text-destructive focus:text-destructive"
+              >
+                {clearAllSessions.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Clearing conversations...
+                  </>
+                ) : (
+                  'Clear All Conversations'
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleOpenSkillsConfig}>
+                Skills Config
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Resize handle - only visible on desktop */}
@@ -164,6 +244,35 @@ export function Sidebar({ className, collapsed = false, onToggleCollapse }: Side
           onClick={() => setIsMobileOpen(false)}
         />
       )}
+
+      <AlertDialog open={showClearAllDialog} onOpenChange={setShowClearAllDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all conversations?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete all conversations and messages. This action cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearAllSessions.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClearAllConversations}
+              disabled={clearAllSessions.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {clearAllSessions.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Clearing...
+                </>
+              ) : (
+                'Clear all'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

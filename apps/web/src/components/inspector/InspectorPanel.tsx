@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import { X, GripVertical } from 'lucide-react';
+import { X, GripVertical, ChevronRight } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
 import { cn } from '../../lib/utils';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Button } from '../ui/button';
-import { ToolCallCard } from './ToolCallCard';
-import { ReasoningTrace } from './ReasoningTrace';
-import { SourcesList } from './SourcesList';
 import { ComputerPanel } from './ComputerPanel';
+import { ReasoningTrace } from './ReasoningTrace';
 
 const MIN_INSPECTOR_WIDTH = 280;
 const MAX_INSPECTOR_WIDTH = 560;
 const DEFAULT_INSPECTOR_WIDTH = 320;
 const STORAGE_KEY = 'inspector-width';
+const COLLAPSE_ANIMATION_MS = 220;
 const clampInspectorWidth = (value: number) =>
   Math.min(Math.max(value, MIN_INSPECTOR_WIDTH), MAX_INSPECTOR_WIDTH);
 
@@ -23,10 +21,14 @@ interface InspectorPanelProps {
 }
 
 export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps) {
-  const inspectorTab = useChatStore((state) => state.inspectorTab);
-  const setInspectorTab = useChatStore((state) => state.setInspectorTab);
-  const toolCalls = useChatStore((state) => state.toolCalls);
   const selectedMessageId = useChatStore((state) => state.selectedMessageId);
+  const isStreaming = useChatStore((state) => state.isStreaming);
+  const streamingSessionId = useChatStore((state) => state.streamingSessionId);
+  const reasoningMap = useChatStore((state) => state.reasoningSteps);
+  const messages = useChatStore((state) => (sessionId ? state.messages.get(sessionId) || [] : []));
+  const toolCalls = useChatStore((state) => state.toolCalls);
+  const executionSteps = useChatStore((state) => (sessionId ? state.executionSteps.get(sessionId) || [] : []));
+  const browserSession = useChatStore((state) => (sessionId ? state.browserSession.get(sessionId) : undefined));
   const [width, setWidth] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored
@@ -34,6 +36,18 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
       : DEFAULT_INSPECTOR_WIDTH;
   });
   const [isResizing, setIsResizing] = useState(false);
+  const [computerExpanded, setComputerExpanded] = useState(true);
+  const [reasoningExpanded, setReasoningExpanded] = useState(true);
+  const [computerBodyMounted, setComputerBodyMounted] = useState(true);
+
+  useEffect(() => {
+    if (computerExpanded) {
+      setComputerBodyMounted(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setComputerBodyMounted(false), COLLAPSE_ANIMATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [computerExpanded]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(width));
@@ -72,21 +86,40 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
     };
   }, [isResizing, handleMouseMove, handleMouseUp]);
 
+  const isSessionStreaming = !!sessionId && isStreaming && streamingSessionId === sessionId;
+  const selectedMessageKey = selectedMessageId ? `msg-${selectedMessageId}` : null;
+  const latestAssistantMessageWithTrace = [...messages]
+    .reverse()
+    .find((message) => message.role === 'assistant' && (reasoningMap.get(`msg-${message.id}`)?.length ?? 0) > 0);
+  const fallbackMessageKey = latestAssistantMessageWithTrace ? `msg-${latestAssistantMessageWithTrace.id}` : null;
+  const sessionReasoningSteps = sessionId ? reasoningMap.get(sessionId) || [] : [];
+  const reasoningKey = selectedMessageKey
+    ? selectedMessageKey
+    : sessionReasoningSteps.length > 0
+      ? sessionId
+      : fallbackMessageKey ?? sessionId ?? '';
+  const reasoningSteps = reasoningKey ? reasoningMap.get(reasoningKey) || [] : [];
+  const hasRunningReasoning = reasoningSteps.some((step) => step.status === 'running');
+  const hasFailedExecution = executionSteps.some((step) => step.status === 'failed');
   const sessionToolCalls = sessionId
-    ? Array.from(toolCalls.values())
-        .filter((call) => {
-          if (call.sessionId !== sessionId) return false;
-          if (call.status === 'pending') return false;
-          // When a message is selected, only show its tool calls
-          if (selectedMessageId) {
-            return call.messageId === selectedMessageId;
-          }
-          return true;
-        })
-        .reverse()
+    ? Array.from(toolCalls.values()).filter((call) => {
+        if (call.sessionId !== sessionId) return false;
+        if (selectedMessageId) return call.messageId === selectedMessageId;
+        return true;
+      })
     : [];
-
-  const showComputerTab = !!sessionId;
+  const hasFailedToolCall = sessionToolCalls.some((call) => call.status === 'failed');
+  const computerStatusLabel = isSessionStreaming || browserSession?.status === 'launching'
+    ? 'Live'
+    : hasFailedExecution
+      ? 'Failed'
+      : 'Completed';
+  const reasoningStatusLabel = hasRunningReasoning
+    ? 'Running'
+    : hasFailedToolCall
+      ? 'Failed'
+      : 'Completed';
+  const computerSectionExpanded = computerExpanded || computerBodyMounted;
 
   return (
     <aside
@@ -115,79 +148,92 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
 
           <div className="flex-1 min-w-0 overflow-hidden">
             {sessionId ? (
-              <Tabs
-                value={inspectorTab}
-                onValueChange={(value) =>
-                  setInspectorTab(value as 'reasoning' | 'tools' | 'sources' | 'computer')
-                }
-                className="flex h-full flex-col"
-              >
-                <div className="shrink-0 border-b px-3 pb-2 pt-3">
-                  <TabsList className="w-full">
-                    <TabsTrigger value="tools" className="flex-1">Tools</TabsTrigger>
-                    <TabsTrigger value="sources" className="flex-1">Sources</TabsTrigger>
-                    <TabsTrigger value="reasoning" className="flex-1">Reasoning</TabsTrigger>
-                    {showComputerTab ? (
-                      <TabsTrigger value="computer" className="flex-1">Computer</TabsTrigger>
-                    ) : null}
-                  </TabsList>
-                </div>
-
-                <div className="relative flex-1 min-w-0 overflow-hidden">
-                  <TabsContent
-                    value="tools"
-                    forceMount
-                    className="absolute inset-0 m-0 min-w-0 overflow-y-auto p-3 data-[state=inactive]:hidden"
+              <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overflow-x-hidden p-3">
+                <section
+                  className={cn(
+                    'flex min-w-0 flex-col rounded-lg border border-border/70 bg-card/90 shadow-sm',
+                    computerSectionExpanded && 'flex-1 min-h-0'
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setComputerExpanded((prev) => !prev)}
+                    className="flex w-full shrink-0 items-center justify-between gap-2 px-4 py-3 text-left"
                   >
-                    {sessionToolCalls.length > 0 ? (
-                      <div className="min-w-0 rounded-xl border bg-muted/10">
-                        <div className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left">
-                          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                            <span>Tool Calls</span>
-                          </div>
-                        </div>
-                        <div className="min-w-0 space-y-3 overflow-x-auto px-4 pb-4">
-                          {sessionToolCalls.map((call, index) => (
-                            <ToolCallCard
-                              key={call.toolCallId}
-                              toolCall={call}
-                              isLast={index === sessionToolCalls.length - 1}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-                        No tool activity yet.
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <ChevronRight
+                        className={cn(
+                          'h-4 w-4 text-muted-foreground transition-transform',
+                          computerExpanded && 'rotate-90'
+                        )}
+                      />
+                      <span className="text-sm font-medium text-foreground">Computer</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span
+                        className={cn(
+                          'h-2 w-2 rounded-full',
+                          computerStatusLabel === 'Live' && 'bg-red-500',
+                          computerStatusLabel === 'Completed' && 'bg-emerald-500',
+                          computerStatusLabel === 'Failed' && 'bg-destructive'
+                        )}
+                      />
+                      {computerStatusLabel}
+                    </div>
+                  </button>
+                  <div
+                    className={cn(
+                      'grid overflow-hidden transition-[grid-template-rows,opacity] duration-200 ease-out',
+                      computerExpanded
+                        ? 'grid-rows-[1fr] border-t border-border/60 opacity-100'
+                        : 'grid-rows-[0fr] opacity-0'
                     )}
-                  </TabsContent>
-
-                  <TabsContent
-                    value="sources"
-                    forceMount
-                    className="absolute inset-0 m-0 min-w-0 overflow-y-auto p-3 data-[state=inactive]:hidden"
                   >
-                    <SourcesList sessionId={sessionId} selectedMessageId={selectedMessageId} />
-                  </TabsContent>
+                    {computerBodyMounted ? (
+                      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-2.5">
+                        <ComputerPanel sessionId={sessionId} compact />
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
 
-                  <TabsContent
-                    value="reasoning"
-                    forceMount
-                    className="absolute inset-0 m-0 min-w-0 overflow-y-auto p-3 data-[state=inactive]:hidden"
+                <section className="min-w-0 rounded-lg border border-border/70 bg-card/90 shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setReasoningExpanded((prev) => !prev)}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
                   >
-                    <ReasoningTrace sessionId={sessionId} selectedMessageId={selectedMessageId} />
-                  </TabsContent>
-
-                  <TabsContent
-                    value="computer"
-                    forceMount
-                    className="absolute inset-0 m-0 flex h-full min-h-0 min-w-0 flex-col overflow-hidden px-3 pt-3 pb-0 data-[state=inactive]:hidden"
-                  >
-                    <ComputerPanel sessionId={sessionId} />
-                  </TabsContent>
-                </div>
-              </Tabs>
+                    <div className="flex items-center gap-2">
+                      <ChevronRight
+                        className={cn(
+                          'h-4 w-4 text-muted-foreground transition-transform',
+                          reasoningExpanded && 'rotate-90'
+                        )}
+                      />
+                      <span className="text-sm font-medium text-foreground">Reasoning Trace</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span
+                        className={cn(
+                          'h-2 w-2 rounded-full',
+                          reasoningStatusLabel === 'Running' && 'bg-blue-500',
+                          reasoningStatusLabel === 'Completed' && 'bg-emerald-500',
+                          reasoningStatusLabel === 'Failed' && 'bg-destructive'
+                        )}
+                      />
+                      {reasoningStatusLabel}
+                    </div>
+                  </button>
+                  {reasoningExpanded ? (
+                    <div className="border-t border-border/60 px-3 py-2.5">
+                      <ReasoningTrace
+                        sessionId={sessionId}
+                        selectedMessageId={selectedMessageId}
+                      />
+                    </div>
+                  ) : null}
+                </section>
+              </div>
             ) : (
               <div className="p-4 text-sm text-muted-foreground">
                 Inspector is available once a session is selected.

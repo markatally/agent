@@ -4,11 +4,12 @@
  */
 
 import { chromium } from 'playwright';
-import type { Browser, BrowserContext, Page, CDPSession } from 'playwright';
+import type { Browser, BrowserContext, Page, CDPSession, LaunchOptions } from 'playwright';
 import type { BrowserSessionInfo, BrowserConfig } from './types';
 import { getConfig } from '../config';
 import type { AppConfig } from '../config';
 import { getFrameBufferService } from './frame-buffer';
+import fs from 'fs';
 
 type ScreencastFrameHandler = (params: { data: string; sessionId: number; metadata?: unknown }) => void;
 
@@ -27,6 +28,8 @@ export interface BrowserSession {
 }
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
+const DEFAULT_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
 function getBrowserConfig(): BrowserConfig | null {
   const config = getConfig() as AppConfig;
@@ -88,30 +91,22 @@ export class BrowserManager {
 
     const viewport = config.viewport ?? DEFAULT_VIEWPORT;
 
-    const browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--disable-gpu',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-background-networking',
-        '--disable-blink-features=AutomationControlled',
-      ],
-    });
+    const browser = await this.launchChromiumWithFallback();
 
     const context = await browser.newContext({
       viewport: { width: viewport.width, height: viewport.height },
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      userAgent: DEFAULT_USER_AGENT,
+      locale: 'en-US',
+      timezoneId: 'UTC',
       ignoreHTTPSErrors: true,
       extraHTTPHeaders: {
         'Accept-Language': 'en-US,en;q=0.9',
         Accept:
           'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Upgrade-Insecure-Requests': '1',
       },
     });
+    await this.applyStealthInitScript(context);
 
     const page = await context.newPage();
     const cdpSession = await context.newCDPSession(page);
@@ -137,6 +132,117 @@ export class BrowserManager {
     }
 
     return browserSession;
+  }
+
+  private async launchChromiumWithFallback(): Promise<Browser> {
+    const baseArgs = [
+      '--disable-gpu',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-background-networking',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process',
+    ];
+
+    const localExecutables = this.getLocalBrowserExecutables();
+    const launchAttempts: LaunchOptions[] = [
+      ...localExecutables.map(
+        (executablePath): LaunchOptions => ({
+          headless: true,
+          executablePath,
+          args: baseArgs,
+          ignoreDefaultArgs: ['--enable-automation'],
+        })
+      ),
+      // Prefer system Chrome where available for closer parity with local browsing behavior.
+      {
+        headless: true,
+        channel: 'chrome',
+        args: baseArgs,
+        ignoreDefaultArgs: ['--enable-automation'],
+      },
+      // Try installed Playwright Chromium channel before falling back to headless-shell.
+      {
+        headless: true,
+        channel: 'chromium',
+        args: baseArgs,
+        ignoreDefaultArgs: ['--enable-automation'],
+      },
+      {
+        headless: true,
+        args: baseArgs,
+        ignoreDefaultArgs: ['--enable-automation'],
+      },
+      {
+        headless: true,
+        args: baseArgs,
+      },
+    ];
+
+    let lastError: unknown = null;
+    for (const options of launchAttempts) {
+      try {
+        return await chromium.launch(options);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    const message = lastError instanceof Error ? lastError.message : 'Unknown launch failure';
+    throw new Error(`Failed to launch Chromium browser: ${message}`);
+  }
+
+  private getLocalBrowserExecutables(): string[] {
+    const candidatesByPlatform: Record<string, string[]> = {
+      darwin: [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      ],
+      linux: [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/opt/google/chrome/chrome',
+        '/usr/bin/microsoft-edge',
+      ],
+      win32: [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files\\Chromium\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      ],
+    };
+
+    const candidates = candidatesByPlatform[process.platform] ?? [];
+    return candidates.filter((path) => {
+      try {
+        return fs.existsSync(path);
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  private async applyStealthInitScript(context: BrowserContext): Promise<void> {
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+      Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+
+      const win = window as unknown as { chrome?: { runtime?: Record<string, unknown> } };
+      if (!win.chrome) {
+        win.chrome = {};
+      }
+      if (!win.chrome.runtime) {
+        win.chrome.runtime = {};
+      }
+    });
   }
 
   /**

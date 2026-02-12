@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
@@ -53,7 +53,7 @@ vi.mock('../../stores/authStore', () => ({
       updateToolCall: vi.fn(),
     };
 
-  const useChatStore = vi.fn((selector?: (state: typeof chatState) => any) =>
+  const useChatStore: any = vi.fn((selector?: (state: typeof chatState) => any) =>
     selector ? selector(chatState) : chatState
   );
   useChatStore.getState = () => chatState;
@@ -71,6 +71,7 @@ describe('Hooks', () => {
   );
   
   beforeEach(() => {
+    vi.clearAllMocks();
     queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -109,6 +110,29 @@ describe('Hooks', () => {
       const { result } = renderHook(() => useCreateSession(), { wrapper });
       
       expect(result.current.mutate).toBeDefined();
+    });
+
+    it('should clear all sessions', async () => {
+      const { apiClient } = await import('../../lib/api');
+      const { useClearAllSessions } = await import('../../hooks/useSessions');
+
+      vi.mocked(apiClient.sessions.list).mockResolvedValueOnce({
+        sessions: [
+          { id: 'session-1' } as any,
+          { id: 'session-2' } as any,
+        ],
+      });
+
+      const { result } = renderHook(() => useClearAllSessions(), { wrapper });
+
+      await act(async () => {
+        await result.current.mutateAsync();
+      });
+
+      expect(apiClient.sessions.list).toHaveBeenCalledTimes(1);
+      expect(apiClient.sessions.delete).toHaveBeenCalledTimes(2);
+      expect(apiClient.sessions.delete).toHaveBeenCalledWith('session-1');
+      expect(apiClient.sessions.delete).toHaveBeenCalledWith('session-2');
     });
   });
 

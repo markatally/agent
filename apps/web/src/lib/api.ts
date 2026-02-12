@@ -1,5 +1,4 @@
 import type { User, Session, Message } from '@mark/shared';
-import { useAuthStore } from '../stores/authStore';
 
 // API base URL (proxied through Vite dev server)
 const API_BASE_URL = '/api';
@@ -19,6 +18,19 @@ export class ApiError extends Error {
 // Auth tokens management
 let accessToken: string | null = null;
 let refreshToken: string | null = null;
+let authStoreSyncHandlers:
+  | {
+      setIsAuthenticated: (isAuthenticated: boolean) => void;
+      setUser: (user: User | null) => void;
+    }
+  | null = null;
+
+export function registerAuthStoreSyncHandlers(handlers: {
+  setIsAuthenticated: (isAuthenticated: boolean) => void;
+  setUser: (user: User | null) => void;
+}) {
+  authStoreSyncHandlers = handlers;
+}
 
 // When tokens are cleared, also update the Zustand store
 function syncTokenStateToStore(token: string | null, refresh: string | null) {
@@ -27,12 +39,12 @@ function syncTokenStateToStore(token: string | null, refresh: string | null) {
   if (token) {
     localStorage.setItem('accessToken', token);
     localStorage.setItem('refreshToken', refresh || '');
-    useAuthStore.getState().setIsAuthenticated(true);
+    authStoreSyncHandlers?.setIsAuthenticated(true);
   } else {
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
-    useAuthStore.getState().setIsAuthenticated(false);
-    useAuthStore.getState().setUser(null);
+    authStoreSyncHandlers?.setIsAuthenticated(false);
+    authStoreSyncHandlers?.setUser(null);
   }
 }
 

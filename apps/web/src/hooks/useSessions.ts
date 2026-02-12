@@ -122,3 +122,58 @@ export function useDeleteSession() {
     },
   });
 }
+
+/**
+ * Delete all sessions for the current user
+ */
+export function useClearAllSessions() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.sessions.list();
+      const sessions = response.sessions ?? [];
+
+      if (sessions.length === 0) {
+        return { deletedCount: 0, totalCount: 0 };
+      }
+
+      const results = await Promise.allSettled(
+        sessions.map((session) => apiClient.sessions.delete(session.id))
+      );
+
+      const deletedCount = results.filter((result) => result.status === 'fulfilled').length;
+      const failedCount = results.length - deletedCount;
+
+      if (failedCount > 0) {
+        throw new Error(`Deleted ${deletedCount} conversations, but ${failedCount} failed.`);
+      }
+
+      return { deletedCount, totalCount: sessions.length };
+    },
+    onSuccess: ({ deletedCount }) => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+
+      if (deletedCount === 0) {
+        toast({
+          title: 'No conversations to clear',
+          description: 'You do not have any conversations yet.',
+        });
+        return;
+      }
+
+      toast({
+        title: 'Conversations cleared',
+        description: `Removed ${deletedCount} conversation${deletedCount === 1 ? '' : 's'}.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Failed to clear conversations',
+        description: error.message || 'Could not clear all conversations',
+        variant: 'destructive',
+      });
+    },
+  });
+}

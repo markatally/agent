@@ -15,6 +15,7 @@ vi.mock('../../lib/api', () => ({
   setTokens: vi.fn(),
   clearTokens: vi.fn(),
   getAccessToken: vi.fn(),
+  registerAuthStoreSyncHandlers: vi.fn(),
 }));
 
 // Helper to create mock user matching User type

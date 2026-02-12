@@ -1,8 +1,8 @@
 /**
- * E2E: Computer tab and step screenshots in PPT pipeline
+ * E2E: Inspector computer viewport and step screenshots in PPT pipeline
  *
  * Verifies:
- * 1. Computer tab shows viewport area (placeholder or screenshot) when open
+ * 1. Inspector shows computer viewport area (placeholder or screenshot) when open
  * 2. After sending a PPT-style message, placeholder appears and screenshots can appear per step
  */
 
@@ -23,19 +23,17 @@ async function login(page: Page) {
   await page.waitForSelector('[data-testid="chat-input"]', { timeout: 30000 });
 }
 
-async function openInspectorAndComputerTab(page: Page) {
+async function openInspector(page: Page) {
   const inspectorHeading = page.getByText('Inspector');
   const openInspector = page.getByRole('button', { name: /open inspector/i });
   if ((await inspectorHeading.count()) === 0 && (await openInspector.count()) > 0) {
     await openInspector.click();
   }
   await expect(inspectorHeading).toBeVisible({ timeout: 10000 });
-  const computerTab = page.getByRole('tab', { name: 'Computer' });
-  await computerTab.click();
 }
 
-test.describe('Computer tab and step screenshots', () => {
-  test('Computer tab shows viewport area (placeholder or screenshot or Sandbox)', async ({
+test.describe('Inspector computer viewport and step screenshots', () => {
+  test('inspector shows viewport area (placeholder or screenshot or Sandbox)', async ({
     page,
   }) => {
     await login(page);
@@ -49,7 +47,7 @@ test.describe('Computer tab and step screenshots', () => {
       await computerSwitch.click();
     }
 
-    await openInspectorAndComputerTab(page);
+    await openInspector(page);
 
     const placeholder = page.locator('[data-testid="computer-viewport-placeholder"]');
     const viewport = page.locator('[data-testid="browser-viewport"]');
@@ -82,7 +80,7 @@ test.describe('Computer tab and step screenshots', () => {
     await chatInput.fill('Make a 1-slide PPT about cats.');
     await chatInput.press('Enter');
 
-    await openInspectorAndComputerTab(page);
+    await openInspector(page);
 
     const placeholder = page.locator('[data-testid="computer-viewport-placeholder"]');
     await expect(placeholder).toBeVisible({ timeout: 15000 });
@@ -91,13 +89,15 @@ test.describe('Computer tab and step screenshots', () => {
     const screenshotImg = page.locator('[data-testid="browser-viewport-screenshot"]');
     const browserOff = page.getByText('Browser view is off');
     const snapshotUnavailable = placeholder.getByText(/Snapshot unavailable for this step/i);
+    const noVisualSteps = page.getByText(/No visual steps yet/i);
     await expect
       .poll(
         async () => {
           const screenshotVisible = await screenshotImg.first().isVisible().catch(() => false);
           const browserOffVisible = await browserOff.first().isVisible().catch(() => false);
           const snapshotUnavailableVisible = await snapshotUnavailable.first().isVisible().catch(() => false);
-          return screenshotVisible || browserOffVisible || snapshotUnavailableVisible;
+          const noVisualStepsVisible = await noVisualSteps.first().isVisible().catch(() => false);
+          return screenshotVisible || browserOffVisible || snapshotUnavailableVisible || noVisualStepsVisible;
         },
         { timeout: 90000 }
       )

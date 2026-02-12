@@ -109,6 +109,20 @@ interface PptPipelineState {
 const SIDEBAR_OPEN_STORAGE_KEY = 'sidebar-open';
 const EXECUTION_MODE_STORAGE_KEY = 'execution-mode';
 const COMPUTER_STATE_PREFIX = 'mark-agent-computer-';
+const LEGACY_RECONSTRUCTED_SNAPSHOT_MARKER = 'Snapshot unavailable (reconstructed from history)';
+
+function isLegacyReconstructedSnapshotDataUrl(value: string): boolean {
+  if (!value.startsWith('data:image/svg+xml')) return false;
+  if (value.includes(encodeURIComponent(LEGACY_RECONSTRUCTED_SNAPSHOT_MARKER))) return true;
+  if (value.includes(LEGACY_RECONSTRUCTED_SNAPSHOT_MARKER)) return true;
+  const commaIndex = value.indexOf(',');
+  if (commaIndex < 0) return false;
+  try {
+    return decodeURIComponent(value.slice(commaIndex + 1)).includes(LEGACY_RECONSTRUCTED_SNAPSHOT_MARKER);
+  } catch {
+    return false;
+  }
+}
 
 function normalizePersistedScreenshot(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -116,7 +130,12 @@ function normalizePersistedScreenshot(value: unknown): string | undefined {
   if (!trimmed) return undefined;
 
   // Data URLs are safe to keep as-is.
-  if (trimmed.startsWith('data:image/')) return trimmed;
+  if (trimmed.startsWith('data:image/')) {
+    // Old relogin reconstruction stored synthetic placeholders as screenshots.
+    // Drop those so the UI falls back to real history screenshots or explicit placeholder text.
+    if (isLegacyReconstructedSnapshotDataUrl(trimmed)) return undefined;
+    return trimmed;
+  }
 
   // Legacy bug: nested data URL prefix accidentally persisted.
   const nestedPrefixMatch = trimmed.match(

@@ -66,7 +66,11 @@ export function ChatPage() {
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
-      <Sidebar collapsed={!sidebarOpen} onToggleCollapse={() => setSidebarOpen(false)} />
+      <Sidebar
+        collapsed={!sidebarOpen}
+        onToggleCollapse={() => setSidebarOpen(false)}
+        onOpenSkillsConfig={() => setSkillsModalOpen(true)}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         {/* Main content area */}

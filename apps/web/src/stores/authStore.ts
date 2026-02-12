@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User } from '@mark/shared';
-import { apiClient, setTokens, clearTokens, getAccessToken } from '../lib/api';
+import {
+  apiClient,
+  setTokens,
+  clearTokens,
+  getAccessToken,
+  registerAuthStoreSyncHandlers,
+} from '../lib/api';
 
 interface AuthState {
   // State
@@ -160,6 +166,11 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+registerAuthStoreSyncHandlers({
+  setIsAuthenticated: (isAuth: boolean) => useAuthStore.getState().setIsAuthenticated(isAuth),
+  setUser: (user: User | null) => useAuthStore.getState().setUser(user),
+});
 
 // Initialize auth state on app load
 if (typeof window !== 'undefined') {

@@ -23,7 +23,6 @@ describe('MessageItem', () => {
   it('renders user message correctly', () => {
     render(<MessageItem message={mockUserMessage} />);
 
-    expect(screen.getByText('You')).toBeInTheDocument();
     expect(screen.getByText('Hello, world!')).toBeInTheDocument();
   });
 

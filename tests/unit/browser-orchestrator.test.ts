@@ -17,6 +17,15 @@ describe('browser/orchestrator web-search snapshot helpers', () => {
     expect(normalized).toBe('https://www.wsj.com/tech/ai/story');
   });
 
+  it('removes Cloudflare challenge query params from web-search URLs', () => {
+    const url =
+      'https://finextra.com/newsarticle/47264/ai-personal-banking-assistant-cleo-relaunches-in-uk?__cf_chl_rt_tk=abc123&utm_source=feed';
+    const normalized = normalizeWebSearchUrl(url);
+    expect(normalized).toBe(
+      'https://finextra.com/newsarticle/47264/ai-personal-banking-assistant-cleo-relaunches-in-uk'
+    );
+  });
+
   it('keeps non-tracking query params while removing tracking params', () => {
     const url = 'https://example.com/search?q=ai&sort=date&utm_medium=email&gclid=123';
     const normalized = normalizeWebSearchUrl(url);
@@ -150,6 +159,81 @@ describe('browser/orchestrator web-search snapshot helpers', () => {
       'Market update',
       'https://example.com/news',
       '<html><body>Shares rose to 401 points after dipping from 403 earlier in the session.</body></html>'
+    );
+    expect(blocked).toBe(false);
+  });
+
+  it('does not classify rich article pages as challenge walls due to incidental marker text', () => {
+    const blocked = isHumanVerificationWall(
+      'NFL-Super Bowl prepares for potential AI cyber security threat',
+      'https://www.itnews.com.au/news/nfl-super-bowl-prepares-for-potential-ai-cyber-security-threat-623395',
+      `
+      <html>
+        <head>
+          <meta property="og:type" content="article" />
+          <script type="application/ld+json">{"@type":"NewsArticle"}</script>
+        </head>
+        <body>
+          <article>
+            <p>Levi's Stadium received a large security technology refresh.</p>
+            <p>Teams are coordinating incident response with federal agencies.</p>
+            <p>Analysts warn vendors can be temporarily blocked during maintenance windows.</p>
+            <p>The report also references access denied incidents from unrelated prior events.</p>
+            <p>Defenders increased telemetry and segmentation for game-day workloads.</p>
+            <p>This article includes multiple paragraphs and long-form body content to reflect production pages.</p>
+          </article>
+        </body>
+      </html>
+      `
+    );
+    expect(blocked).toBe(false);
+  });
+
+  it('does not classify Reuters video pages as challenge walls from generic JS-enable text', () => {
+    const blocked = isHumanVerificationWall(
+      'Backstreet Boys bring nostalgia to Super Bowl ads',
+      'https://www.reuters.com/video/watch/idRW290705022026RP1/?chan=business',
+      `
+      <html>
+        <head>
+          <meta property="og:title" content="Reuters Video: Warm-up teaser" />
+          <meta property="og:site_name" content="Reuters" />
+          <meta name="twitter:card" content="summary_large_image" />
+        </head>
+        <body>
+          <main>
+            <video controls src="video.mp4"></video>
+            <noscript>Please enable javascript to view this video.</noscript>
+            <p>Video transcript and related coverage.</p>
+          </main>
+        </body>
+      </html>
+      `
+    );
+    expect(blocked).toBe(false);
+  });
+
+  it('does not classify community topic pages as challenge walls from incidental blocked words', () => {
+    const blocked = isHumanVerificationWall(
+      'Backstreet Boys bring nostalgia to T-Mobile ads',
+      'https://community.designtaxi.com/topic/23143-backstreet-boys-bring-nostalgia-to-t-mobiles-super-bowl-ad-with-a-playful-warm-up-teaser/',
+      `
+      <html>
+        <head>
+          <meta property="og:title" content="DesignTaxi Community Topic" />
+          <meta property="og:site_name" content="DesignTaxi Community" />
+        </head>
+        <body>
+          <main>
+            <article>
+              <p>Community members discussed the teaser campaign and nostalgia factor.</p>
+              <p>Some comments mention users getting temporarily blocked when posting too fast.</p>
+              <p>No verification wall appears for normal browsing.</p>
+            </article>
+          </main>
+        </body>
+      </html>
+      `
     );
     expect(blocked).toBe(false);
   });

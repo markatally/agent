@@ -8,6 +8,7 @@ import { TimelineScrubber } from './TimelineScrubber';
 
 interface ComputerPanelProps {
   sessionId: string;
+  compact?: boolean;
 }
 
 const formatFileSize = (bytes?: number): string => {
@@ -104,7 +105,8 @@ function normalizeUrl(raw: string): string {
         /^ref$/i.test(key) ||
         /^ref_src$/i.test(key) ||
         /^igshid$/i.test(key) ||
-        /^mkt_tok$/i.test(key)
+        /^mkt_tok$/i.test(key) ||
+        /^__cf_chl_/i.test(key)
       ) {
         parsed.searchParams.delete(key);
       }
@@ -115,7 +117,7 @@ function normalizeUrl(raw: string): string {
   }
 }
 
-export function ComputerPanel({ sessionId }: ComputerPanelProps) {
+export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps) {
   const isStreaming = useChatStore((state) => state.isStreaming);
   const streamingSessionId = useChatStore((state) => state.streamingSessionId);
   const terminalLines = useChatStore((state) => state.terminalLines.get(sessionId) || []);
@@ -224,6 +226,16 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
 
   const hasAgentTimeline = agentSteps.length > 0;
   const hasReplayTimeline = hasAgentTimeline || browserActions.length > 0;
+  const stackedContainerClass = compact ? 'h-full space-y-3 overflow-y-auto pr-1' : 'space-y-4';
+  const replaySurfaceClass = compact
+    ? 'flex min-h-0 flex-1 flex-col'
+    : 'flex min-h-0 flex-1 flex-col rounded-xl border bg-muted/10';
+  const replayContentClass = compact
+    ? 'flex min-h-0 flex-1 flex-col gap-2 overflow-hidden'
+    : 'flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-4';
+  const timelineControlsClass = compact
+    ? 'rounded-lg border border-border/60 bg-muted/20 px-2 py-1.5'
+    : undefined;
 
   if (hasReplayTimeline && !(isPptTask && pptPipeline)) {
     const replayIndex = hasAgentTimeline ? agentCurrentIndex : browserCurrentIndex;
@@ -238,20 +250,9 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
         getLatestBrowserActionScreenshot(browserActions);
     return (
       <div className="flex h-full min-h-0 flex-1 flex-col">
-        <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-muted/10">
-          <div className="flex items-center justify-between gap-2 px-4 py-3">
-            <div className="text-sm font-medium text-foreground">Computer</div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span
-                className={cn(
-                  'h-2 w-2 rounded-full',
-                  replayLive ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'
-                )}
-              />
-              {replayLive ? 'Live' : 'Completed'}
-            </div>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
+        <section className={replaySurfaceClass}>
+          <div className={replayContentClass}>
+            {!compact ? <div className="pt-3" /> : null}
             <BrowserToolbar
               status={browserSession?.status ?? (isBrowserMode ? 'active' : 'closed')}
               currentUrl={selectedStepUrl}
@@ -296,6 +297,7 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
               showLiveIndicator={false}
               showBackForwardLabels
               stepLabel="Step"
+              className={timelineControlsClass}
             />
             {!replaySnapshot && (
               <div
@@ -320,15 +322,9 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
 
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <section className="flex min-h-0 flex-1 flex-col rounded-xl border bg-muted/10">
-          <div className="flex shrink-0 items-center justify-between gap-2 px-4 py-3">
-            <div className="text-sm font-medium text-foreground">Computer</div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className={cn('h-2 w-2 rounded-full', isLive ? 'bg-red-500 animate-pulse' : 'bg-emerald-500')} />
-              {isLive ? 'Live' : 'Completed'}
-            </div>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4">
+        <section className={replaySurfaceClass}>
+          <div className={replayContentClass}>
+            {!compact ? <div className="pt-3" /> : null}
             <div className="text-xs text-muted-foreground">{activityLabel}</div>
 
             {(() => {
@@ -417,6 +413,7 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
                           showLiveIndicator={false}
                           showBackForwardLabels
                           stepLabel="Step"
+                          className={timelineControlsClass}
                         />
                       )}
                       {!viewportSnapshot && (
@@ -484,6 +481,7 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
                         onSeek={(index) => setSelectedVisitIndex(index)}
                         showBackForwardLabels
                         stepLabel="Page"
+                        className={timelineControlsClass}
                       />
                       <div
                         data-testid="computer-key-pages-list"
@@ -573,16 +571,9 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
 
   if (orderedSteps.length === 0 && terminalLines.length === 0 && sandboxFiles.length === 0) {
     return (
-      <div className="space-y-4">
-        <section className="rounded-xl border bg-muted/10">
-          <div className="flex items-center justify-between gap-2 px-4 py-3">
-            <div className="text-sm font-medium text-foreground">Computer</div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              Completed
-            </div>
-          </div>
-          <div className="space-y-3 px-4 pb-4">
+      <div className={stackedContainerClass}>
+        <section className={cn(compact ? 'rounded-md' : 'rounded-xl border bg-muted/10')}>
+          <div className={cn('space-y-3', compact ? 'px-1 py-1' : 'px-4 pb-4 pt-3')}>
             <BrowserToolbar
               status="closed"
               currentUrl=""
@@ -590,7 +581,11 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
               isLive={false}
               displayLabel="Output ready"
             />
-            <BrowserViewport sessionId={sessionId} enabled={false} showLive={false} />
+            <BrowserViewport
+              sessionId={sessionId}
+              enabled={false}
+              showLive={false}
+            />
             <div
               data-testid="computer-viewport-placeholder"
               className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
@@ -604,7 +599,7 @@ export function ComputerPanel({ sessionId }: ComputerPanelProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className={stackedContainerClass}>
       <section className="rounded-xl border bg-muted/10">
         <div className="flex items-center justify-between gap-2 px-4 py-3">
           <div className="text-sm font-medium text-foreground">Step Timeline</div>

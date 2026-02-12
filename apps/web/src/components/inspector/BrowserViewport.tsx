@@ -1,13 +1,19 @@
-import { useEffect, useRef } from 'react';
+import { useMemo, useState } from 'react';
 import { useBrowserStream } from '../../hooks/useBrowserStream';
 import { cn } from '../../lib/utils';
-
-const ASPECT_RATIO = 16 / 9;
+import {
+  type SourceDimensions,
+  type ViewportSizingMode,
+  getMediaObjectFit,
+  getViewportContainerStyle,
+  resolveAspectRatio,
+} from './viewportSizing';
 
 interface BrowserViewportProps {
   sessionId: string | null;
   enabled: boolean;
   snapshotUrl?: string | null;
+  sizingMode?: ViewportSizingMode;
   /** When false, show stored snapshot instead of live WebSocket frame (e.g. when scrubbing history) */
   showLive?: boolean;
   /** When true, fill parent height and use minHeight instead of fixed 16:9 aspect ratio */
@@ -24,50 +30,32 @@ export function BrowserViewport({
   sessionId,
   enabled,
   snapshotUrl,
+  sizingMode = 'fit',
   showLive = true,
   fillHeight = false,
   minHeight = 320,
   className,
 }: BrowserViewportProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const { frameDataUrl, status, error } = useBrowserStream(sessionId, enabled);
   const displayLive = showLive !== false && !!frameDataUrl;
-  const viewportStyle = fillHeight
-    ? ({ minHeight } as const)
-    : ({ aspectRatio: ASPECT_RATIO } as const);
+  const [sourceDimensions, setSourceDimensions] = useState<SourceDimensions | null>(null);
 
-  useEffect(() => {
-    if (!frameDataUrl || !canvasRef.current) return;
-
-    const img = new Image();
-    img.onload = () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const dpr = window.devicePixelRatio ?? 1;
-      const rect = canvas.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
-
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-      ctx.scale(dpr, dpr);
-
-      const scale = Math.min(w / img.width, h / img.height);
-      const drawW = img.width * scale;
-      const drawH = img.height * scale;
-      const x = (w - drawW) / 2;
-      const y = (h - drawH) / 2;
-
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fillRect(0, 0, w, h);
-      ctx.drawImage(img, x, y, drawW, drawH);
-    };
-    img.src = frameDataUrl;
-  }, [frameDataUrl]);
+  const viewportStyle = useMemo(
+    () =>
+      getViewportContainerStyle({
+        mode: sizingMode,
+        sourceDimensions,
+        fillHeight,
+        minHeight,
+      }),
+    [fillHeight, minHeight, sizingMode, sourceDimensions]
+  );
+  const ratio = resolveAspectRatio(sourceDimensions);
+  const mediaObjectFit = getMediaObjectFit(sizingMode);
+  const activeSrc = displayLive ? frameDataUrl : snapshotUrl ?? frameDataUrl;
+  const isPixelMode = sizingMode === 'pixel';
+  const isFillMode = sizingMode === 'fill';
+  const useFitRatioWrapper = sizingMode === 'fit' && fillHeight;
 
   if (!enabled && !snapshotUrl) {
     return (
@@ -128,28 +116,59 @@ export function BrowserViewport({
   return (
     <div
       data-testid="browser-viewport"
-      className={cn('overflow-hidden rounded-lg border bg-black', fillHeight && 'min-h-0 flex-1', className)}
+      className={cn(
+        'rounded-lg border bg-muted/20',
+        fillHeight && 'flex min-h-0 flex-1 items-center justify-center',
+        isPixelMode ? 'overflow-auto' : fillHeight ? 'overflow-hidden' : 'overflow-auto',
+        className
+      )}
       style={viewportStyle}
     >
-      {displayLive ? (
-        <canvas
-          ref={canvasRef}
-          className="h-full max-h-full w-full object-contain"
-          style={{ width: '100%', height: '100%' }}
-        />
-      ) : snapshotUrl ? (
-        <img
-          data-testid="browser-viewport-screenshot"
-          src={snapshotUrl}
-          alt="Browser screenshot"
-          className="h-full max-h-full w-full object-contain"
-        />
-      ) : frameDataUrl ? (
-        <canvas
-          ref={canvasRef}
-          className="h-full max-h-full w-full object-contain"
-          style={{ width: '100%', height: '100%' }}
-        />
+      {activeSrc ? (
+        useFitRatioWrapper ? (
+          <img
+            data-testid={displayLive ? 'browser-viewport-live' : 'browser-viewport-screenshot'}
+            src={activeSrc}
+            alt="Browser viewport"
+            onLoad={(event) => {
+              const next = {
+                width: event.currentTarget.naturalWidth,
+                height: event.currentTarget.naturalHeight,
+              };
+              if (next.width > 0 && next.height > 0) {
+                setSourceDimensions(next);
+              }
+            }}
+            className="max-h-full max-w-full object-contain"
+          />
+        ) : (
+          <img
+            data-testid={displayLive ? 'browser-viewport-live' : 'browser-viewport-screenshot'}
+            src={activeSrc}
+            alt="Browser viewport"
+            onLoad={(event) => {
+              const next = {
+                width: event.currentTarget.naturalWidth,
+                height: event.currentTarget.naturalHeight,
+              };
+              if (next.width > 0 && next.height > 0) {
+                setSourceDimensions(next);
+              }
+            }}
+            className={cn(
+              isPixelMode ? 'max-h-none max-w-none' : 'h-full w-full'
+            )}
+            style={
+              isPixelMode
+                ? {
+                    width: sourceDimensions ? `${sourceDimensions.width}px` : 'auto',
+                    height: sourceDimensions ? `${sourceDimensions.height}px` : 'auto',
+                    objectFit: 'none',
+                  }
+                : { objectFit: mediaObjectFit }
+            }
+          />
+        )
       ) : null}
     </div>
   );

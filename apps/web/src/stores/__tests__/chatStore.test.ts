@@ -352,4 +352,40 @@ describe('chatStore', () => {
       expect(updatedMessage.content).toBe('Updated content');
     });
   });
+
+  describe('computer state hydration', () => {
+    it('drops legacy reconstructed SVG placeholder screenshots on load', () => {
+      const sessionId = 'session-legacy';
+      const legacySvg =
+        'data:image/svg+xml;charset=utf-8,' +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg"><text>Snapshot unavailable (reconstructed from history)</text></svg>'
+        );
+
+      localStorage.setItem(
+        `mark-agent-computer-${sessionId}`,
+        JSON.stringify({
+          agentSteps: {
+            currentStepIndex: 0,
+            steps: [
+              {
+                stepIndex: 0,
+                type: 'browse',
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now(),
+                  url: 'https://example.com',
+                  screenshot: legacySvg,
+                },
+              },
+            ],
+          },
+        })
+      );
+
+      useChatStore.getState().loadComputerStateFromStorage(sessionId);
+      const state = useChatStore.getState();
+      expect(state.agentSteps.get(sessionId)?.steps[0]?.snapshot?.screenshot).toBeUndefined();
+    });
+  });
 });

@@ -20,6 +20,7 @@ const TRACKING_QUERY_PARAM_PATTERNS = [
   /^utm_/i,
   /^ga_/i,
   /^gaa_/i,
+  /^__cf_chl_/i,
   /^gclid$/i,
   /^fbclid$/i,
   /^mc_eid$/i,
@@ -93,21 +94,26 @@ type WebSearchNavigationOutcome = {
   };
 };
 
-const HUMAN_VERIFICATION_TEXT_MARKERS = [
+const STRICT_CHALLENGE_MARKERS = [
   'please verify you are a human',
   'access to this page has been denied because we believe you are using automation tools',
   'powered by perimeterx',
   'challenge by cloudflare',
   'cf-challenge',
+  'just a moment...',
+  'checking your browser before accessing',
+  'attention required',
+  'robot check',
+  'unusual traffic from your computer network',
+];
+
+const LOW_CONFIDENCE_CHALLENGE_MARKERS = [
   'captcha',
-  'enable javascript and cookies',
   'enable javascript and cookies to continue',
-  '403 forbidden',
-  '401 unauthorized',
+  'please enable javascript',
+  'enable javascript and cookies',
   'request forbidden',
   'access denied',
-  'please enable javascript',
-  'unusual traffic from your computer network',
   'temporarily blocked',
 ];
 
@@ -286,85 +292,223 @@ function unwrapProxyLikeUrl(rawUrl: string): string {
   }
 }
 
-function buildBlockedPageFallbackHtml(entry: WebSearchEntry, errors: string[]): string {
-  const escapedTitle = (entry.title ?? entry.normalizedUrl)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-  const escapedUrl = entry.normalizedUrl
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-  const escapedSnippet = (entry.snippet ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-  const escapedErrors = errors
-    .slice(0, 4)
-    .map((item) =>
-      item
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-    );
+const READER_FETCH_TIMEOUT_MS = 7000;
+const READER_PREVIEW_MAX_PARAGRAPHS = 3;
+const READER_PREVIEW_MAX_TEXT_LENGTH = 4200;
+const FALLBACK_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
-  return `<!doctype html>
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replaceAll('&nbsp;', ' ')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'");
+}
+
+function normalizeTextSnippet(input: string, maxLength = READER_PREVIEW_MAX_TEXT_LENGTH): string {
+  const normalized = decodeHtmlEntities(input)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function extractMetaContent(html: string, field: string): string {
+  const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const attrBefore = new RegExp(
+    `<meta[^>]+(?:name|property)=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`,
+    'i'
+  );
+  const attrAfter = new RegExp(
+    `<meta[^>]+content=["']([^"']+)["'][^>]*(?:name|property)=["']${escaped}["'][^>]*>`,
+    'i'
+  );
+  const match = html.match(attrBefore) ?? html.match(attrAfter);
+  return normalizeTextSnippet(match?.[1] ?? '', 260);
+}
+
+function extractParagraphSnippetsFromHtml(html: string): string[] {
+  const paragraphs = Array.from(html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi))
+    .map((match) => normalizeTextSnippet(match[1] ?? '', 420))
+    .filter((text) => text.length >= 80);
+  const deduped = Array.from(new Set(paragraphs));
+  return deduped.slice(0, READER_PREVIEW_MAX_PARAGRAPHS);
+}
+
+async function fetchReaderPreviewFromSource(url: string): Promise<{ title?: string; snippets: string[] } | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), READER_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': FALLBACK_USER_AGENT,
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+    const body = await response.text();
+    if (!body.trim()) return null;
+
+    if (contentType.includes('text/html') || body.includes('<html')) {
+      if (isHumanVerificationWall(undefined, response.url, body)) {
+        return null;
+      }
+      const title =
+        extractMetaContent(body, 'og:title') ||
+        normalizeTextSnippet(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '', 200) ||
+        undefined;
+      const description =
+        extractMetaContent(body, 'description') ||
+        extractMetaContent(body, 'og:description');
+      const snippets = [
+        ...(description ? [description] : []),
+        ...extractParagraphSnippetsFromHtml(body),
+      ];
+      const deduped = Array.from(new Set(snippets.filter(Boolean))).slice(
+        0,
+        READER_PREVIEW_MAX_PARAGRAPHS
+      );
+      if (!title && deduped.length === 0) return null;
+      return { title, snippets: deduped };
+    }
+
+    const textSnippet = normalizeTextSnippet(body, 680);
+    if (!textSnippet) return null;
+    return { snippets: [textSnippet] };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function buildContentSnapshotHtml(
+  entry: WebSearchEntry,
+  errors: string[]
+): Promise<{ html: string; title: string }> {
+  const fetchedPreview = await fetchReaderPreviewFromSource(entry.normalizedUrl);
+  const title = fetchedPreview?.title || normalizeTextSnippet(entry.title ?? entry.normalizedUrl, 220);
+  const snippets = Array.from(
+    new Set(
+      [
+        ...(fetchedPreview?.snippets ?? []),
+        normalizeTextSnippet(entry.snippet ?? '', 500),
+      ].filter(Boolean)
+    )
+  ).slice(0, READER_PREVIEW_MAX_PARAGRAPHS);
+  const sections =
+    snippets.length > 0
+      ? snippets.map((snippet) => `<p>${escapeHtml(snippet)}</p>`).join('')
+      : '<p>Live page capture was restricted, so this preview uses the best available source metadata.</p>';
+  const diagnostics = errors.slice(0, 3);
+  const hostname = extractHostname(entry.normalizedUrl) ?? 'source';
+
+  return {
+    title,
+    html: `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Snapshot fallback</title>
+  <title>${escapeHtml(title)}</title>
   <style>
     :root { color-scheme: light; }
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f4f6fb;
-      color: #101623;
-      padding: 32px;
+      background: linear-gradient(140deg, #eef4ff 0%, #f8fbff 45%, #ffffff 100%);
+      color: #0f172a;
+      font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 28px;
     }
-    .card {
+    article {
       max-width: 980px;
       margin: 0 auto;
-      background: #fff;
-      border: 1px solid #d7deec;
-      border-radius: 12px;
-      box-shadow: 0 8px 20px rgba(16, 22, 35, 0.08);
-      padding: 22px;
+      border: 1px solid #d8e4fb;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      padding: 24px 26px;
     }
-    h1 { margin: 0 0 8px 0; font-size: 20px; }
-    p { margin: 8px 0; line-height: 1.5; }
-    code {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 6px;
-      background: #eef2fb;
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      background: #dbeafe;
+      color: #1e40af;
       font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+      margin-bottom: 12px;
     }
-    ul { margin: 8px 0 0 18px; padding: 0; }
-    li { margin: 6px 0; }
+    h1 {
+      margin: 0;
+      font-size: 27px;
+      line-height: 1.25;
+    }
+    .source {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #334155;
+    }
+    .source strong { color: #0f172a; }
+    .content {
+      margin-top: 18px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 14px;
+    }
+    p {
+      margin: 0 0 10px 0;
+      line-height: 1.65;
+      color: #1e293b;
+      font-size: 15px;
+    }
+    .diag {
+      margin-top: 14px;
+      border-top: 1px dashed #cbd5e1;
+      padding-top: 10px;
+      font-size: 12px;
+      color: #64748b;
+    }
+    .diag ul { margin: 8px 0 0 18px; padding: 0; }
   </style>
 </head>
 <body>
-  <article class="card">
-    <h1>Snapshot fallback: source page blocked</h1>
-    <p><strong>Title:</strong> ${escapedTitle}</p>
-    <p><strong>Source URL:</strong> <code>${escapedUrl}</code></p>
+  <article>
+    <span class="badge">Reader snapshot</span>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="source"><strong>Source:</strong> ${escapeHtml(hostname)} · ${escapeHtml(entry.normalizedUrl)}</div>
+    <section class="content">${sections}</section>
     ${
-      escapedSnippet
-        ? `<p><strong>Search snippet:</strong> ${escapedSnippet}</p>`
-        : '<p><strong>Search snippet:</strong> Not available in provider response.</p>'
-    }
-    ${
-      escapedErrors.length
-        ? `<p><strong>Navigation errors:</strong></p><ul>${escapedErrors
-            .map((err) => `<li><code>${err}</code></li>`)
-            .join('')}</ul>`
+      diagnostics.length > 0
+        ? `<div class="diag">Navigation diagnostics:<ul>${diagnostics
+            .map((item) => `<li>${escapeHtml(item)}</li>`)
+            .join('')}</ul></div>`
         : ''
     }
   </article>
 </body>
-</html>`;
+</html>`,
+  };
 }
 
 type GotoResponse = { status: () => number } | null;
@@ -459,11 +603,78 @@ export function isHumanVerificationWall(
     return true;
   }
 
-  if (/\b403\s+forbidden\b/.test(combined) || /\b401\s+unauthorized\b/.test(combined)) {
+  const articleSignalScore = scoreLikelyArticleContent(titleLower, urlLower, htmlLower);
+  const strictMarkerHits = STRICT_CHALLENGE_MARKERS.filter((marker) =>
+    combined.includes(marker)
+  ).length;
+  const lowConfidenceHits = LOW_CONFIDENCE_CHALLENGE_MARKERS.filter((marker) =>
+    combined.includes(marker)
+  ).length;
+  const explicitHttpDenied = /\b403\s+forbidden\b/.test(combined) || /\b401\s+unauthorized\b/.test(combined);
+  const deniedTitle = /\b(access denied|forbidden|attention required|just a moment)\b/.test(titleLower);
+  const deniedSignal = /\b(access denied|forbidden|captcha|challenge|temporarily blocked)\b/.test(
+    combined
+  );
+
+  if (explicitHttpDenied && articleSignalScore < 5) {
     return true;
   }
 
-  return HUMAN_VERIFICATION_TEXT_MARKERS.some((marker) => combined.includes(marker));
+  if (strictMarkerHits >= 1 && articleSignalScore < 5) {
+    return true;
+  }
+
+  if (lowConfidenceHits >= 2 && deniedSignal && articleSignalScore < 5) {
+    return true;
+  }
+
+  if (lowConfidenceHits >= 1 && /\b(access denied|forbidden)\b/.test(combined) && articleSignalScore <= 2) {
+    return true;
+  }
+
+  if (deniedTitle && lowConfidenceHits >= 1 && articleSignalScore < 5) {
+    return true;
+  }
+
+  return false;
+}
+
+function scoreLikelyArticleContent(titleLower: string, urlLower: string, htmlLower: string): number {
+  let score = 0;
+
+  if (htmlLower.includes('<article')) score += 2;
+  if (/og:type["']?\s+content=["']article/.test(htmlLower) || /property=["']og:type["']\s+content=["']article/.test(htmlLower)) {
+    score += 2;
+  }
+  if (/"@type"\s*:\s*"(newsarticle|article)"/.test(htmlLower)) score += 2;
+
+  const paragraphCount = (htmlLower.match(/<p[\s>]/g) || []).length;
+  if (paragraphCount >= 4) score += 1;
+  if (paragraphCount >= 8) score += 1;
+
+  const textApprox = htmlLower
+    .replace(/<script[\s\S]*?<\/script>/g, ' ')
+    .replace(/<style[\s\S]*?<\/style>/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const wordCount = textApprox ? textApprox.split(' ').length : 0;
+  if (wordCount >= 120) score += 1;
+  if (wordCount >= 350) score += 1;
+
+  if (titleLower.length >= 24 && !/\b(access denied|forbidden|captcha|challenge)\b/.test(titleLower)) {
+    score += 1;
+  }
+
+  if (/\/(news|article|articles)\//.test(urlLower)) score += 1;
+  if (/\/(video|topic|forum|community)\//.test(urlLower)) score += 1;
+  if (/<meta[^>]+property=["']og:title["']/.test(htmlLower)) score += 1;
+  if (/<meta[^>]+property=["']og:site_name["']/.test(htmlLower)) score += 1;
+  if (/<meta[^>]+name=["']twitter:card["']/.test(htmlLower)) score += 1;
+  if (htmlLower.includes('<main')) score += 1;
+  if (htmlLower.includes('<video')) score += 1;
+
+  return score;
 }
 
 export async function navigateWebSearchEntryWithFallback(
@@ -586,15 +797,18 @@ export async function navigateWebSearchEntryWithFallback(
   }
 
   try {
-    const html = buildBlockedPageFallbackHtml(entry, errors);
-    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 5000 });
+    const readerSnapshot = await buildContentSnapshotHtml(entry, errors);
+    await page.setContent(readerSnapshot.html, {
+      waitUntil: 'domcontentloaded',
+      timeout: 5000,
+    });
     await sleep(200);
     return {
       ok: true,
       displayUrl: entry.normalizedUrl,
-      loadedUrl: page.url(),
-      title: `Snapshot fallback: ${entry.title ?? entry.normalizedUrl}`,
-      mode: 'fallback',
+      loadedUrl: entry.normalizedUrl,
+      title: readerSnapshot.title,
+      mode: 'reader',
       errors,
       diagnostics: {
         attempts: attemptDiagnostics,
@@ -718,8 +932,8 @@ export function createBrowserObservableExecutor(
                 : navigation.mode === 'direct'
                   ? `Visited ${navigation.displayUrl} from web search`
                 : navigation.mode === 'reader'
-                    ? `Visited ${navigation.displayUrl} via fallback`
-                    : `Captured fallback snapshot for blocked page ${navigation.displayUrl}`;
+                    ? `Captured content snapshot for ${navigation.displayUrl}`
+                    : `Captured backup snapshot for ${navigation.displayUrl}`;
             const navigationError =
               navigation.ok
                 ? undefined
