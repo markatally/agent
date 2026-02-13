@@ -186,9 +186,9 @@ export class WebSearchTool implements Tool {
       },
       maxResults: {
         type: 'number' as const,
-        description: 'Number of results to return (default: 5, max: 10)',
+        description: 'Number of results to return (default: 5, max: 20)',
         minimum: 1,
-        maximum: 10,
+        maximum: 20,
       },
       includeContent: {
         type: 'boolean' as const,
@@ -227,7 +227,7 @@ export class WebSearchTool implements Tool {
     const maxResultsRaw = Number(params.maxResults);
     const maxResults = Math.min(
       Math.max(Number.isFinite(maxResultsRaw) ? maxResultsRaw : 5, 1),
-      10
+      20
     );
     const includeContent = params.includeContent !== false;
     const searchDepth = (params.searchDepth as SearchDepth) || 'basic';

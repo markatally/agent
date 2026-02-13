@@ -503,4 +503,202 @@ describe('ComputerPanel', () => {
     expect(screen.queryByText(/Snapshot unavailable for this step/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('browser-viewport-screenshot')).toHaveAttribute('src', shot);
   });
+
+  it('does not show stale browser timeline when latest assistant message has no computer steps', () => {
+    const shot =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>stale</text></svg>');
+
+    useChatStore.setState({
+      messages: new Map([
+        [
+          'session-stale',
+          [
+            {
+              id: 'u-old',
+              sessionId: 'session-stale',
+              role: 'user',
+              content: 'old prompt',
+              createdAt: new Date(Date.now() - 2000),
+            },
+            {
+              id: 'msg-old',
+              sessionId: 'session-stale',
+              role: 'assistant',
+              content: 'old answer',
+              createdAt: new Date(Date.now() - 1900),
+            },
+            {
+              id: 'u-new',
+              sessionId: 'session-stale',
+              role: 'user',
+              content: 'hi',
+              createdAt: new Date(Date.now() - 1000),
+            },
+            {
+              id: 'msg-new',
+              sessionId: 'session-stale',
+              role: 'assistant',
+              content: 'Hi! How can I help you today?',
+              createdAt: new Date(Date.now() - 900),
+            },
+          ],
+        ],
+      ]),
+      browserSession: new Map([
+        [
+          'session-stale',
+          {
+            active: false,
+            currentUrl: 'https://example.com',
+            currentTitle: 'Example',
+            status: 'closed',
+            actions: [
+              {
+                id: 'a1',
+                type: 'navigate',
+                url: 'https://example.com',
+                timestamp: Date.now() - 1500,
+                screenshotDataUrl: shot,
+              },
+            ],
+            currentActionIndex: 0,
+          },
+        ],
+      ]),
+      agentSteps: new Map([
+        [
+          'session-stale',
+          {
+            currentStepIndex: 0,
+            steps: [
+              {
+                stepIndex: 0,
+                messageId: 'msg-old',
+                type: 'browse',
+                output: 'Visit page',
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now() - 1500,
+                  url: 'https://example.com',
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    render(<ComputerPanel sessionId="session-stale" compact />);
+
+    expect(screen.getByTestId('computer-empty-state')).toBeInTheDocument();
+    expect(screen.queryByTestId('browser-viewport-screenshot')).not.toBeInTheDocument();
+  });
+
+  it('restores historical snapshots by timestamp window when messageId scope is missing', () => {
+    const oldShot =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>old-window</text></svg>');
+    const newShot =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>new-window</text></svg>');
+
+    const now = Date.now();
+    const oldAssistantAt = new Date(now - 3000);
+    const newAssistantAt = new Date(now - 1000);
+
+    useChatStore.setState({
+      selectedMessageId: 'msg-old',
+      messages: new Map([
+        [
+          'session-window-scope',
+          [
+            {
+              id: 'u-old',
+              sessionId: 'session-window-scope',
+              role: 'user',
+              content: 'old',
+              createdAt: new Date(now - 3500),
+            },
+            {
+              id: 'msg-old',
+              sessionId: 'session-window-scope',
+              role: 'assistant',
+              content: 'old reply',
+              createdAt: oldAssistantAt,
+            },
+            {
+              id: 'u-new',
+              sessionId: 'session-window-scope',
+              role: 'user',
+              content: 'new',
+              createdAt: new Date(now - 1500),
+            },
+            {
+              id: 'msg-new',
+              sessionId: 'session-window-scope',
+              role: 'assistant',
+              content: 'new reply',
+              createdAt: newAssistantAt,
+            },
+          ],
+        ],
+      ]),
+      browserSession: new Map([
+        [
+          'session-window-scope',
+          {
+            active: false,
+            currentUrl: 'https://new.example.com',
+            currentTitle: 'New',
+            status: 'closed',
+            actions: [],
+            currentActionIndex: 0,
+          },
+        ],
+      ]),
+      agentSteps: new Map([
+        [
+          'session-window-scope',
+          {
+            currentStepIndex: 1,
+            steps: [
+              {
+                stepIndex: 0,
+                // Intentionally missing messageId to simulate historical scope loss
+                type: 'browse',
+                output: 'Old run',
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: oldAssistantAt.getTime() - 100,
+                  url: 'https://old.example.com',
+                  screenshot: oldShot,
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+              {
+                stepIndex: 1,
+                // Intentionally missing messageId to simulate historical scope loss
+                type: 'browse',
+                output: 'New run',
+                snapshot: {
+                  stepIndex: 1,
+                  timestamp: newAssistantAt.getTime() - 100,
+                  url: 'https://new.example.com',
+                  screenshot: newShot,
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    render(<ComputerPanel sessionId="session-window-scope" compact />);
+
+    const viewport = screen.getByTestId('browser-viewport-screenshot');
+    expect(viewport).toHaveAttribute('src', oldShot);
+  });
 });

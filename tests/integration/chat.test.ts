@@ -231,6 +231,34 @@ describe('Chat Integration Tests', () => {
 
       expect(res.status).toBe(404);
     });
+
+    it('should gracefully complete when no user message exists', async () => {
+      const emptySession = await prisma.session.create({
+        data: {
+          userId: testUser.id,
+          name: 'Empty Stream Session',
+          status: 'active',
+        },
+      });
+
+      try {
+        const res = await app.request(`/api/sessions/${emptySession.id}/stream`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type') || '').toContain('text/event-stream');
+
+        const bodyText = await res.text();
+        expect(bodyText).toContain('"type":"message.complete"');
+        expect(bodyText).toContain('"finishReason":"no_message"');
+      } finally {
+        await prisma.session.delete({ where: { id: emptySession.id } }).catch(() => {});
+      }
+    });
   });
 });
 

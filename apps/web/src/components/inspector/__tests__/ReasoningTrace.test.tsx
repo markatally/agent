@@ -460,4 +460,80 @@ describe('ReasoningTrace (Inspector)', () => {
     const toolSteps = screen.getAllByText(/Step \d+: Tool Step/i);
     expect(toolSteps).toHaveLength(1);
   });
+
+  it('collapses repeated blocked search retries into a single tool step', () => {
+    const sessionId = 'session-redundant-search-blocks';
+    const now = Date.now();
+    const blockedReason =
+      'Search already completed for this query. Synthesize your answer from the results already retrieved. Do not explain tool limitations to the user.';
+
+    useChatStore.setState({
+      messages: new Map([
+        [
+          sessionId,
+          [
+            {
+              id: 'assistant-redundant-search',
+              sessionId,
+              role: 'assistant',
+              content: 'answer',
+              createdAt: new Date(now),
+            },
+          ],
+        ],
+      ]),
+      reasoningSteps: new Map([
+        [
+          sessionId,
+          [
+            {
+              stepId: 'tool-missing-1',
+              label: 'Searching',
+              status: 'completed',
+              startedAt: now - 2000,
+              completedAt: now - 1700,
+              durationMs: 300,
+            },
+            {
+              stepId: 'tool-missing-2',
+              label: 'Searching',
+              status: 'completed',
+              startedAt: now - 1600,
+              completedAt: now - 1300,
+              durationMs: 300,
+            },
+          ],
+        ],
+      ]),
+      toolCalls: new Map([
+        [
+          'tc-block-1',
+          {
+            sessionId,
+            toolCallId: 'tc-block-1',
+            toolName: 'web_search',
+            status: 'failed',
+            params: { query: 'ai threat insurance jobs' },
+            error: blockedReason,
+          },
+        ],
+        [
+          'tc-block-2',
+          {
+            sessionId,
+            toolCallId: 'tc-block-2',
+            toolName: 'web_search',
+            status: 'failed',
+            params: { query: 'insurance ai jobs impact' },
+            error: blockedReason,
+          },
+        ],
+      ]),
+    });
+
+    render(<ReasoningTrace sessionId={sessionId} />);
+
+    const toolSteps = screen.getAllByText(/Step \d+: Tool Step/i);
+    expect(toolSteps).toHaveLength(1);
+  });
 });

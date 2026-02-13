@@ -129,4 +129,55 @@ describe('DocumentRenderer artifacts', () => {
     expect(screen.getByText('deck.pptx')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument();
   });
+
+  it('hides internal search-results.json artifacts from message output', () => {
+    vi.mocked(useSessionMessages).mockReturnValue({
+      data: [
+        {
+          id: 'assistant-search',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: 'Here are the results.',
+          createdAt: new Date(),
+        },
+      ],
+      isLoading: false,
+      error: null,
+    } as any);
+
+    useChatStore.setState({
+      toolCalls: new Map([
+        [
+          'tool-search',
+          {
+            sessionId: 'session-1',
+            messageId: 'assistant-search',
+            toolCallId: 'tool-search',
+            toolName: 'web_search',
+            params: {},
+            status: 'completed',
+            result: {
+              success: true,
+              output: 'done',
+              duration: 10,
+              artifacts: [
+                {
+                  type: 'file',
+                  name: 'search-results.json',
+                  fileId: 'file-search',
+                  mimeType: 'application/json',
+                  size: 1200,
+                  content: '{}',
+                },
+              ],
+            },
+          },
+        ],
+      ]),
+    });
+
+    render(<DocumentRenderer sessionId="session-1" />);
+
+    expect(screen.queryByText('search-results.json')).not.toBeInTheDocument();
+  });
 });

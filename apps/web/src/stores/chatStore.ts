@@ -111,6 +111,10 @@ const EXECUTION_MODE_STORAGE_KEY = 'execution-mode';
 const COMPUTER_STATE_PREFIX = 'mark-agent-computer-';
 const LEGACY_RECONSTRUCTED_SNAPSHOT_MARKER = 'Snapshot unavailable (reconstructed from history)';
 
+function getToolCallStoreKey(sessionId: string, toolCallId: string): string {
+  return `${sessionId}:${toolCallId}`;
+}
+
 function isLegacyReconstructedSnapshotDataUrl(value: string): boolean {
   if (!value.startsWith('data:image/svg+xml')) return false;
   if (value.includes(encodeURIComponent(LEGACY_RECONSTRUCTED_SNAPSHOT_MARKER))) return true;
@@ -307,9 +311,15 @@ interface ChatState {
   startToolCall: (sessionId: string, toolCallId: string, toolName: string, params: any) => void;
   /** Atomic upsert used when hydrating persisted tool calls on page load/refresh. */
   upsertToolCall: (toolCall: ToolCallStatus) => void;
-  updateToolCall: (toolCallId: string, updates: Partial<ToolCallStatus>) => void;
-  updateToolCallProgress: (toolCallId: string, current: number, total: number, message?: string) => void;
-  completeToolCall: (toolCallId: string, result: ToolResult) => void;
+  updateToolCall: (sessionId: string, toolCallId: string, updates: Partial<ToolCallStatus>) => void;
+  updateToolCallProgress: (
+    sessionId: string,
+    toolCallId: string,
+    current: number,
+    total: number,
+    message?: string
+  ) => void;
+  completeToolCall: (sessionId: string, toolCallId: string, result: ToolResult) => void;
   associateToolCallsWithMessage: (sessionId: string, messageId: string) => void;
   clearToolCalls: (sessionId?: string) => void;
 
@@ -517,7 +527,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   startToolCall: (sessionId: string, toolCallId: string, toolName: string, params: any) => {
     set((state) => {
       const newToolCalls = new Map(state.toolCalls);
-      newToolCalls.set(toolCallId, {
+      newToolCalls.set(getToolCallStoreKey(sessionId, toolCallId), {
         sessionId,
         toolCallId,
         toolName,
@@ -532,9 +542,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   upsertToolCall: (toolCall: ToolCallStatus) => {
     set((state) => {
       const newToolCalls = new Map(state.toolCalls);
-      const existing = newToolCalls.get(toolCall.toolCallId);
+      const storeKey = getToolCallStoreKey(toolCall.sessionId, toolCall.toolCallId);
+      const existing = newToolCalls.get(storeKey);
       newToolCalls.set(
-        toolCall.toolCallId,
+        storeKey,
         existing ? { ...existing, ...toolCall } : toolCall
       );
       return { toolCalls: newToolCalls };
@@ -542,24 +553,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // Update a tool call
-  updateToolCall: (toolCallId: string, updates: Partial<ToolCallStatus>) => {
+  updateToolCall: (sessionId: string, toolCallId: string, updates: Partial<ToolCallStatus>) => {
     set((state) => {
       const newToolCalls = new Map(state.toolCalls);
-      const existing = newToolCalls.get(toolCallId);
+      const existing = newToolCalls.get(getToolCallStoreKey(sessionId, toolCallId));
       if (existing) {
-        newToolCalls.set(toolCallId, { ...existing, ...updates });
+        newToolCalls.set(getToolCallStoreKey(sessionId, toolCallId), {
+          ...existing,
+          ...updates,
+        });
       }
       return { toolCalls: newToolCalls };
     });
   },
 
   // Update tool call progress
-  updateToolCallProgress: (toolCallId: string, current: number, total: number, message?: string) => {
+  updateToolCallProgress: (
+    sessionId: string,
+    toolCallId: string,
+    current: number,
+    total: number,
+    message?: string
+  ) => {
     set((state) => {
       const newToolCalls = new Map(state.toolCalls);
-      const existing = newToolCalls.get(toolCallId);
+      const existing = newToolCalls.get(getToolCallStoreKey(sessionId, toolCallId));
       if (existing) {
-        newToolCalls.set(toolCallId, {
+        newToolCalls.set(getToolCallStoreKey(sessionId, toolCallId), {
           ...existing,
           progress: { current, total, message },
         });
@@ -569,12 +589,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // Complete a tool call
-  completeToolCall: (toolCallId: string, result: ToolResult) => {
+  completeToolCall: (sessionId: string, toolCallId: string, result: ToolResult) => {
     set((state) => {
       const newToolCalls = new Map(state.toolCalls);
-      const existing = newToolCalls.get(toolCallId);
+      const existing = newToolCalls.get(getToolCallStoreKey(sessionId, toolCallId));
       if (existing) {
-        newToolCalls.set(toolCallId, {
+        newToolCalls.set(getToolCallStoreKey(sessionId, toolCallId), {
           ...existing,
           status: result.success ? 'completed' : 'failed',
           result: result.success ? result : undefined,
@@ -1135,13 +1155,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   associateAgentStepsWithMessage: (sessionId: string, messageId: string) => {
     set((state) => {
       const agentSteps = new Map(state.agentSteps);
+      const agentRunStartIndex = new Map(state.agentRunStartIndex);
       const existing = agentSteps.get(sessionId);
       if (!existing || existing.steps.length === 0) return state;
-      const steps = existing.steps.map((step) =>
-        step.messageId ? step : { ...step, messageId }
+      const runStartIndex = agentRunStartIndex.get(sessionId) ?? 0;
+      const clampedStart = Math.max(0, Math.min(runStartIndex, existing.steps.length));
+      const steps = existing.steps.map((step, index) =>
+        index >= clampedStart && !step.messageId ? { ...step, messageId } : step
       );
       agentSteps.set(sessionId, { ...existing, steps });
-      return { agentSteps };
+      // Run start marker is consumed once the assistant message is persisted.
+      agentRunStartIndex.delete(sessionId);
+      return { agentSteps, agentRunStartIndex };
     });
     persistComputerState(get, sessionId);
   },

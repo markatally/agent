@@ -16,6 +16,7 @@ export function ChatPage() {
   const navigate = useNavigate();
   const inspectorOpen = useChatStore((state) => state.inspectorOpen);
   const setInspectorOpen = useChatStore((state) => state.setInspectorOpen);
+  const setInspectorTab = useChatStore((state) => state.setInspectorTab);
   const sidebarOpen = useChatStore((state) => state.sidebarOpen);
   const setSidebarOpen = useChatStore((state) => state.setSidebarOpen);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
@@ -56,6 +57,9 @@ export function ChatPage() {
 
   const handleStartChat = async (content: string) => {
     try {
+      // Mount inspector immediately for new-session submit flow.
+      setInspectorTab('computer');
+      setInspectorOpen(true);
       const newSession = await createSession.mutateAsync(undefined);
       navigate(`/chat/${newSession.id}`, { state: { initialMessage: content } });
     } catch (error) {

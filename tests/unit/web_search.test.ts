@@ -131,7 +131,7 @@ describe('WebSearchTool', () => {
 
     const tool = new WebSearchTool(mockContext);
     await tool.execute({ query: 'AI', maxResults: 99 });
-    expect(requestBody.max_results).toBe(10);
+    expect(requestBody.max_results).toBe(20);
 
     await tool.execute({ query: 'AI', maxResults: 0 });
     expect(requestBody.max_results).toBe(1);

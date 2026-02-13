@@ -3,6 +3,11 @@ import { useChatStore } from '../chatStore';
 import type { Message } from '@mark/shared';
 
 describe('chatStore', () => {
+  const getToolCallBySessionAndId = (sessionId: string, toolCallId: string) =>
+    Array.from(useChatStore.getState().toolCalls.values()).find(
+      (call) => call.sessionId === sessionId && call.toolCallId === toolCallId
+    );
+
   beforeEach(() => {
     // Reset store state before each test
     useChatStore.setState({
@@ -209,8 +214,7 @@ describe('chatStore', () => {
       const { startToolCall } = useChatStore.getState();
       startToolCall('session-1', 'tool-1', 'read_file', { path: '/test.txt' });
 
-      const state = useChatStore.getState();
-      const toolCall = state.toolCalls.get('tool-1');
+      const toolCall = getToolCallBySessionAndId('session-1', 'tool-1');
       expect(toolCall).toEqual({
         sessionId: 'session-1',
         toolCallId: 'tool-1',
@@ -223,10 +227,12 @@ describe('chatStore', () => {
     it('should update tool call', () => {
       const { startToolCall, updateToolCall } = useChatStore.getState();
       startToolCall('session-1', 'tool-1', 'read_file', { path: '/test.txt' });
-      updateToolCall('tool-1', { status: 'completed', result: { success: true, output: 'File contents', duration: 0 } });
+      updateToolCall('session-1', 'tool-1', {
+        status: 'completed',
+        result: { success: true, output: 'File contents', duration: 0 },
+      });
 
-      const state = useChatStore.getState();
-      const toolCall = state.toolCalls.get('tool-1');
+      const toolCall = getToolCallBySessionAndId('session-1', 'tool-1');
       expect(toolCall?.status).toBe('completed');
       expect(toolCall?.result?.output).toBe('File contents');
     });
@@ -234,10 +240,13 @@ describe('chatStore', () => {
     it('should complete a tool call successfully', () => {
       const { startToolCall, completeToolCall } = useChatStore.getState();
       startToolCall('session-1', 'tool-1', 'read_file', { path: '/test.txt' });
-      completeToolCall('tool-1', { success: true, output: 'File contents here', duration: 100 });
+      completeToolCall('session-1', 'tool-1', {
+        success: true,
+        output: 'File contents here',
+        duration: 100,
+      });
 
-      const state = useChatStore.getState();
-      const toolCall = state.toolCalls.get('tool-1');
+      const toolCall = getToolCallBySessionAndId('session-1', 'tool-1');
       expect(toolCall?.status).toBe('completed');
       expect(toolCall?.result?.output).toBe('File contents here');
       expect(toolCall?.error).toBeUndefined();
@@ -246,10 +255,14 @@ describe('chatStore', () => {
     it('should handle tool call error', () => {
       const { startToolCall, completeToolCall } = useChatStore.getState();
       startToolCall('session-1', 'tool-1', 'read_file', { path: '/missing.txt' });
-      completeToolCall('tool-1', { success: false, output: '', error: 'File not found', duration: 50 });
+      completeToolCall('session-1', 'tool-1', {
+        success: false,
+        output: '',
+        error: 'File not found',
+        duration: 50,
+      });
 
-      const state = useChatStore.getState();
-      const toolCall = state.toolCalls.get('tool-1');
+      const toolCall = getToolCallBySessionAndId('session-1', 'tool-1');
       expect(toolCall?.status).toBe('failed');
       expect(toolCall?.error).toBe('File not found');
       expect(toolCall?.result).toBeUndefined();
@@ -281,10 +294,10 @@ describe('chatStore', () => {
         result: { success: true, output: 'ok', duration: 12 },
       });
 
-      let state = useChatStore.getState();
-      expect(state.toolCalls.get('tool-1')?.status).toBe('completed');
-      expect(state.toolCalls.get('tool-1')?.messageId).toBe('msg-1');
-      expect(state.toolCalls.get('tool-1')?.result?.output).toBe('ok');
+      let toolCall = getToolCallBySessionAndId('session-1', 'tool-1');
+      expect(toolCall?.status).toBe('completed');
+      expect(toolCall?.messageId).toBe('msg-1');
+      expect(toolCall?.result?.output).toBe('ok');
 
       // Update same tool call id should merge/override fields
       upsertToolCall({
@@ -297,10 +310,29 @@ describe('chatStore', () => {
         error: 'boom',
       });
 
-      state = useChatStore.getState();
-      expect(state.toolCalls.get('tool-1')?.status).toBe('failed');
-      expect(state.toolCalls.get('tool-1')?.params?.query).toBe('test2');
-      expect(state.toolCalls.get('tool-1')?.error).toBe('boom');
+      toolCall = getToolCallBySessionAndId('session-1', 'tool-1');
+      expect(toolCall?.status).toBe('failed');
+      expect(toolCall?.params?.query).toBe('test2');
+      expect(toolCall?.error).toBe('boom');
+    });
+
+    it('should keep tool calls isolated when toolCallId is reused across sessions', () => {
+      const { startToolCall, completeToolCall } = useChatStore.getState();
+
+      startToolCall('session-1', 'tool-1', 'web_search', { query: 'first' });
+      startToolCall('session-2', 'tool-1', 'web_search', { query: 'second' });
+      completeToolCall('session-2', 'tool-1', {
+        success: true,
+        output: 'session-2 result',
+        duration: 10,
+      });
+
+      const session1Call = getToolCallBySessionAndId('session-1', 'tool-1');
+      const session2Call = getToolCallBySessionAndId('session-2', 'tool-1');
+
+      expect(session1Call?.status).toBe('running');
+      expect(session2Call?.status).toBe('completed');
+      expect(session2Call?.result?.output).toBe('session-2 result');
     });
   });
 
@@ -415,6 +447,37 @@ describe('chatStore', () => {
       expect(steps[0]?.messageId).toBe('msg-old');
       expect(steps[1]?.messageId).toBe('msg-new');
       expect(steps[2]?.messageId).toBe('msg-new');
+    });
+
+    it('associates only steps from current run start index', () => {
+      const sessionId = 'session-associate-run-start';
+      useChatStore.setState({
+        agentSteps: new Map([
+          [
+            sessionId,
+            {
+              currentStepIndex: 3,
+              steps: [
+                { stepIndex: 0, type: 'search', output: 'old-1' },
+                { stepIndex: 1, type: 'browse', output: 'old-2' },
+                { stepIndex: 2, type: 'search', output: 'new-1' },
+                { stepIndex: 3, type: 'browse', output: 'new-2' },
+              ],
+            },
+          ],
+        ]),
+        agentRunStartIndex: new Map([[sessionId, 2]]),
+      });
+
+      useChatStore.getState().associateAgentStepsWithMessage(sessionId, 'msg-new');
+
+      const state = useChatStore.getState();
+      const steps = state.agentSteps.get(sessionId)?.steps ?? [];
+      expect(steps[0]?.messageId).toBeUndefined();
+      expect(steps[1]?.messageId).toBeUndefined();
+      expect(steps[2]?.messageId).toBe('msg-new');
+      expect(steps[3]?.messageId).toBe('msg-new');
+      expect(state.agentRunStartIndex.has(sessionId)).toBe(false);
     });
   });
 

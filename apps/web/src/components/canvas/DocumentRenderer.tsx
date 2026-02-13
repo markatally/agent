@@ -16,6 +16,8 @@ interface DocumentRendererProps {
   sessionId: string;
 }
 
+const HIDDEN_ARTIFACT_NAMES = new Set(['search-results.json']);
+
 export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
   const { data: apiMessages, isLoading, error } = useSessionMessages(sessionId);
   const localMessages = useChatStore((state) => state.messages.get(sessionId) || []);
@@ -72,6 +74,7 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
         const callArtifacts = Array.isArray(call.result?.artifacts) ? call.result.artifacts : [];
         for (const artifact of callArtifacts) {
           if (!artifact?.name) continue;
+          if (HIDDEN_ARTIFACT_NAMES.has(artifact.name)) continue;
           const key = `${artifact.fileId || ''}:${artifact.name}`;
           if (dedupe.has(key)) continue;
           dedupe.add(key);

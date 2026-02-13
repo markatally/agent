@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { DocumentCanvas } from '../canvas/DocumentCanvas';
 import { ChatInput } from './ChatInput';
 import { apiClient, type SSEEvent, ApiError } from '../../lib/api';
-import { SSEClient } from '../../lib/sse';
 import { useChatStore } from '../../stores/chatStore';
 import { useSession } from '../../hooks/useSessions';
 import { useToast } from '../../hooks/use-toast';
@@ -63,7 +62,6 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const [isSending, setIsSending] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const activeSseClientRef = useRef<SSEClient | null>(null);
   const initialMessageHandledRef = useRef(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -128,7 +126,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   // Clear tool calls, tables, file artifacts, and message selection when session changes.
   // Rehydrate Computer tab state (browser/PPT) from localStorage so it survives refresh.
   useEffect(() => {
-    clearToolCalls();
+    clearToolCalls(sessionId);
     clearTables();
     clearFiles(sessionId);
     setSelectedMessageId(null);
@@ -138,8 +136,6 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
-      activeSseClientRef.current?.close();
-      activeSseClientRef.current = null;
     };
   }, [sessionId]);
 
@@ -156,6 +152,10 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   }, [messages.length, streamingContent, isThinking]);
 
   const handleSSEEvent = (event: SSEEvent) => {
+    if (event.sessionId && event.sessionId !== sessionId) {
+      return;
+    }
+
     const normalizeUrl = (raw: string | undefined | null) => {
       if (!raw) return raw ?? '';
       try {
@@ -230,10 +230,20 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
 
     switch (event.type) {
       case 'message.start':
-        startStreaming(sessionId);
-        setAgentRunStartIndex(sessionId);
-        clearReasoningSteps(sessionId);
-        clearBrowserSession(sessionId);
+        {
+          const state = useChatStore.getState();
+          const isAlreadyStreamingCurrentSession =
+            state.isStreaming && state.streamingSessionId === sessionId;
+          if (!isAlreadyStreamingCurrentSession) {
+            startStreaming(sessionId);
+          }
+          if (!state.agentRunStartIndex.has(sessionId)) {
+            setAgentRunStartIndex(sessionId);
+          }
+          if ((state.reasoningSteps.get(sessionId)?.length ?? 0) === 0) {
+            clearReasoningSteps(sessionId);
+          }
+        }
         pipelineStageStepIndexRef.current.clear();
         break;
 
@@ -340,7 +350,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
               ? event.data.previewSnapshots
               : undefined,
           };
-          completeToolCall(event.data.toolCallId, toolResult);
+          completeToolCall(sessionId, event.data.toolCallId, toolResult);
           completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
         }
         break;
@@ -369,7 +379,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
             error: event.data.error || 'Unknown error',
             duration: event.data.duration || 0,
           };
-          completeToolCall(event.data.toolCallId, toolResult);
+          completeToolCall(sessionId, event.data.toolCallId, toolResult);
           completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
         }
         break;
@@ -838,11 +848,64 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       return;
     }
 
+    // UI-first run initialization: mount inspector + live trace/timeline at submit time (T=0),
+    // before backend emits message.start/tool events.
+    setInspectorTab('computer');
+    setInspectorOpen(true);
+    startStreaming(sessionId);
+    setAgentRunStartIndex(sessionId);
+    clearReasoningSteps(sessionId);
+    pipelineStageStepIndexRef.current.clear();
+
     setIsSending(true);
     abortControllerRef.current?.abort();
-    activeSseClientRef.current?.close();
-    activeSseClientRef.current = null;
     abortControllerRef.current = new AbortController();
+    const sendStartedAt = Date.now();
+
+    const recoverCompletedAssistantFromServer = async (): Promise<boolean> => {
+      try {
+        const sessionData = await apiClient.sessions.get(sessionId);
+        const orderedMessages = Array.isArray(sessionData.messages) ? sessionData.messages : [];
+
+        // Recover only if we can identify the user message for this send attempt.
+        let sentUserIndex = -1;
+        for (let i = orderedMessages.length - 1; i >= 0; i -= 1) {
+          const candidate = orderedMessages[i];
+          if (candidate?.role !== 'user') continue;
+          const createdAtMs = new Date(candidate.createdAt as any).getTime();
+          if (!Number.isFinite(createdAtMs)) continue;
+          if (createdAtMs < sendStartedAt - 10_000) continue;
+          if ((candidate.content || '').trim() !== content.trim()) continue;
+          sentUserIndex = i;
+          break;
+        }
+
+        if (sentUserIndex < 0) return false;
+
+        let recoveredAssistant: (typeof orderedMessages)[number] | undefined = undefined;
+        for (let i = sentUserIndex + 1; i < orderedMessages.length; i += 1) {
+          if (orderedMessages[i]?.role === 'assistant') {
+            recoveredAssistant = orderedMessages[i];
+            break;
+          }
+        }
+
+        if (!recoveredAssistant) return false;
+
+        const localMessages = useChatStore.getState().messages.get(sessionId) || [];
+        if (!localMessages.some((message) => message.id === recoveredAssistant?.id)) {
+          addMessage(sessionId, recoveredAssistant as any);
+        }
+
+        associateToolCallsWithMessage(sessionId, recoveredAssistant.id);
+        associateAgentStepsWithMessage(sessionId, recoveredAssistant.id);
+        stopStreaming();
+        queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'messages'] });
+        return true;
+      } catch {
+        return false;
+      }
+    };
 
     try {
       // Add optimistic user message
@@ -882,57 +945,23 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
         setInspectorOpen(true);
       }
 
-      // Persist the user message first, then stream assistant response via EventSource SSE.
-      await apiClient.messages.create(sessionId, content);
-
-      await new Promise<void>((resolve, reject) => {
-        let done = false;
-        const streamUrl = apiClient.chat.getStreamUrl(sessionId);
-        const sseClient = new SSEClient();
-        activeSseClientRef.current = sseClient;
-
-        const finish = (next: () => void) => {
-          if (done) return;
-          done = true;
-          sseClient.close();
-          if (activeSseClientRef.current === sseClient) {
-            activeSseClientRef.current = null;
-          }
-          next();
-        };
-
-        const abortListener = () => {
-          finish(() => reject(new DOMException('Aborted', 'AbortError')));
-        };
-        abortControllerRef.current?.signal.addEventListener('abort', abortListener, { once: true });
-
-        sseClient.connect(streamUrl, {
-          onEvent: (event) => {
-            handleSSEEvent(event as SSEEvent);
-            if (event.type === 'message.complete') {
-              finish(resolve);
-            } else if (event.type === 'error') {
-              const message = event.data?.message || 'Stream error';
-              finish(() => reject(new Error(message)));
-            }
-          },
-          onError: (error) => {
-            finish(() => reject(error));
-          },
-          onClose: () => {
-            if (!done) {
-              finish(() => reject(new Error('SSE stream closed before completion')));
-            }
-          },
-          reconnect: true,
-          maxReconnectAttempts: 3,
-        });
-      });
+      // Single request SSE flow: backend persists user message and streams assistant events.
+      for await (const event of apiClient.chat.sendAndStream(
+        sessionId,
+        content,
+        abortControllerRef.current.signal
+      )) {
+        handleSSEEvent(event as SSEEvent);
+      }
 
       // Note: message.complete handler already invalidates queries, no need to duplicate here
     } catch (error: any) {
       if (error?.name === 'AbortError') {
         stopStreaming();
+        setIsSending(false);
+        return;
+      }
+      if (await recoverCompletedAssistantFromServer()) {
         setIsSending(false);
         return;
       }
@@ -966,8 +995,6 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
 
   const handleStopStreaming = () => {
     abortControllerRef.current?.abort();
-    activeSseClientRef.current?.close();
-    activeSseClientRef.current = null;
     stopStreaming();
     setIsSending(false);
   };

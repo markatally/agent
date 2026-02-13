@@ -699,8 +699,9 @@ stream.get('/sessions/:sessionId/stream', async (c) => {
     );
   }
 
-  // Get the latest user message to respond to
-  const latestUserMessage = await prisma.message.findFirst({
+  // Get the latest user message to respond to.
+  // Some legacy clients open /stream before their message write is visible.
+  let latestUserMessage = await prisma.message.findFirst({
     where: {
       sessionId,
       role: 'user',
@@ -711,15 +712,36 @@ stream.get('/sessions/:sessionId/stream', async (c) => {
   });
 
   if (!latestUserMessage) {
-    return c.json(
-      {
-        error: {
-          code: 'NO_MESSAGE',
-          message: 'No user message to respond to',
+    for (let attempt = 0; attempt < 5 && !latestUserMessage; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      latestUserMessage = await prisma.message.findFirst({
+        where: {
+          sessionId,
+          role: 'user',
         },
-      },
-      400
-    );
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+    }
+  }
+
+  if (!latestUserMessage) {
+    // Gracefully close without HTTP error to avoid false "SSE failed" toasts.
+    return streamSSE(c, async (sseStream) => {
+      await sseStream.writeSSE({
+        data: JSON.stringify({
+          type: 'message.complete',
+          sessionId,
+          timestamp: Date.now(),
+          data: {
+            userMessageId: null,
+            assistantMessageId: null,
+            finishReason: 'no_message',
+          },
+        }),
+      });
+    });
   }
 
   // Check if there's already an assistant response for this message
@@ -734,15 +756,45 @@ stream.get('/sessions/:sessionId/stream', async (c) => {
   });
 
   if (existingResponse) {
-    return c.json(
-      {
-        error: {
-          code: 'ALREADY_RESPONDED',
-          message: 'Already responded to the latest message',
-        },
-      },
-      400
-    );
+    // Graceful replay: if another stream already produced the assistant message,
+    // return it via SSE instead of a 400 so clients can finalize cleanly.
+    return streamSSE(c, async (sseStream) => {
+      await sseStream.writeSSE({
+        data: JSON.stringify({
+          type: 'message.start',
+          sessionId,
+          timestamp: Date.now(),
+          data: { userMessageId: latestUserMessage.id },
+        }),
+      });
+
+      if (existingResponse.content) {
+        await sseStream.writeSSE({
+          data: JSON.stringify({
+            type: 'message.delta',
+            sessionId,
+            timestamp: Date.now(),
+            data: { content: existingResponse.content },
+          }),
+        });
+      }
+
+      await sseStream.writeSSE({
+        data: JSON.stringify({
+          type: 'message.complete',
+          sessionId,
+          timestamp: Date.now(),
+          data: {
+            userMessageId: latestUserMessage.id,
+            assistantMessageId: existingResponse.id,
+            finishReason:
+              typeof (existingResponse.metadata as any)?.finishReason === 'string'
+                ? (existingResponse.metadata as any).finishReason
+                : 'stop',
+          },
+        }),
+      });
+    });
   }
 
   // Get conversation history
@@ -980,8 +1032,9 @@ IMPORTANT RULES:
       }
 
       // Save final assistant message to database
+      let assistantMessage: { id: string } | null = null;
       try {
-        const assistantMessage = await prisma.message.create({
+        assistantMessage = await prisma.message.create({
           data: {
             sessionId,
             role: 'assistant',
@@ -1011,6 +1064,20 @@ IMPORTANT RULES:
           throw persistError;
         }
       }
+
+      // Signal stream completion to frontend so it can finalize UI state.
+      await activeStream.writeSSE({
+        data: JSON.stringify({
+          type: 'message.complete',
+          sessionId,
+          timestamp: Date.now(),
+          data: {
+            userMessageId: latestUserMessage.id,
+            assistantMessageId: assistantMessage?.id ?? null,
+            finishReason: result.finishReason,
+          },
+        }),
+      });
     } catch (error) {
       console.error('Stream error:', error);
 

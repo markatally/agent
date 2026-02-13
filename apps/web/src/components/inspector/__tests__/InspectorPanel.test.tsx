@@ -60,6 +60,23 @@ describe('InspectorPanel structure', () => {
     expect(screen.queryByText('Running')).not.toBeInTheDocument();
   });
 
+  it('shows immediate live inspector state before any tool activity', () => {
+    useChatStore.setState({
+      isStreaming: true,
+      streamingSessionId: 'session-1',
+      browserSession: new Map(),
+      reasoningSteps: new Map(),
+      toolCalls: new Map(),
+      messages: new Map(),
+    });
+
+    render(<InspectorPanel open sessionId="session-1" />);
+
+    expect(screen.getByText('Live')).toBeInTheDocument();
+    expect(screen.getByText('thinking...')).toBeInTheDocument();
+    expect(screen.getByTestId('computer-empty-state')).toBeInTheDocument();
+  });
+
   it('shows Idle status before any computer activity', () => {
     render(<InspectorPanel open sessionId="session-1" />);
 

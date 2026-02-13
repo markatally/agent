@@ -7,6 +7,8 @@ export interface StreamEvent {
         'plan.created' | 'plan.step.start' | 'plan.step.complete' |
         'approval.required' | 'file.created' | 'file.modified' | 'file.deleted' |
         'error' | 'session.end' | 'agent.step_limit';
+  sessionId?: string;
+  timestamp?: number;
   data: any;
 }
 
@@ -78,6 +80,8 @@ export class SSEClient {
           // Parse SSE event format
           const streamEvent: StreamEvent = {
             type: data.type || 'message.delta',
+            sessionId: data.sessionId,
+            timestamp: data.timestamp,
             data: data.data || data,
           };
 
@@ -89,6 +93,9 @@ export class SSEClient {
       };
 
       this.eventSource.onerror = (error) => {
+        if (this.isClosed) {
+          return;
+        }
         console.error('SSE connection error:', error);
 
         // Close current connection

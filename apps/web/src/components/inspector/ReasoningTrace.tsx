@@ -72,6 +72,7 @@ const TOOL_LABELS: Record<string, string> = {
 
 const DURATION_THROTTLE_MS = 10;
 const TRACE_MODE_STORAGE_KEY = 'inspector-reasoning-trace-mode';
+const REDUNDANT_SEARCH_BLOCK_REASON = 'Search already completed for this query.';
 
 function getEpochNowMs(): number {
   if (
@@ -235,6 +236,26 @@ function getToolCallSignature(toolCall: ToolCallStatus): string {
   ].join('|');
 }
 
+function isRedundantSearchBlock(toolCall: ToolCallStatus): boolean {
+  const isSearchTool = toolCall.toolName === 'web_search' || toolCall.toolName === 'paper_search';
+  if (!isSearchTool) return false;
+
+  const combinedText = [toolCall.error, toolCall.result?.error, toolCall.result?.output]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join('\n');
+
+  return combinedText.includes(REDUNDANT_SEARCH_BLOCK_REASON);
+}
+
+function getToolCallDedupSignature(toolCall: ToolCallStatus): string {
+  // Collapse repeated blocked search retries into a single trace entry.
+  if (isRedundantSearchBlock(toolCall)) {
+    return `redundant-search-block|${toolCall.toolName}`;
+  }
+
+  return getToolCallSignature(toolCall);
+}
+
 function normalizeStepType(label: string): TimelineStepType {
   const normalized = label.toLowerCase();
   if (normalized.includes('searching') || normalized.includes('tool')) return 'tool';
@@ -369,7 +390,7 @@ function mergeAdjacentTimelineSteps(steps: TimelineStep[]): TimelineStep[] {
 function getTimelineToolSignature(step: TimelineStep): string | null {
   if (step.type !== 'tool') return null;
   const signatures = step.toolCalls
-    .map((toolCall) => getToolCallSignature(toolCall))
+    .map((toolCall) => getToolCallDedupSignature(toolCall))
     .filter(Boolean)
     .sort();
   if (signatures.length === 0) return null;

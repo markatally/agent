@@ -300,9 +300,45 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
   const allAgentSteps = agentTimeline?.steps ?? [];
   const scopedAgentSteps = useMemo(() => {
     const hasMessageScopedSteps = allAgentSteps.some((step) => typeof step.messageId === 'string');
+
+    const getStepTimestamp = (step: (typeof allAgentSteps)[number]): number | null => {
+      const timestamp = step.snapshot?.timestamp;
+      return typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : null;
+    };
+
+    const inferScopedStepsByAssistantWindow = (assistantMessageId: string) => {
+      const assistantMessages = messages
+        .filter((message) => message.role === 'assistant')
+        .sort(
+          (a, b) =>
+            new Date(a.createdAt as any).getTime() - new Date(b.createdAt as any).getTime()
+        );
+      const selectedIndex = assistantMessages.findIndex((message) => message.id === assistantMessageId);
+      if (selectedIndex < 0) return [];
+
+      const selectedTs = new Date(assistantMessages[selectedIndex].createdAt as any).getTime();
+      if (!Number.isFinite(selectedTs)) return [];
+
+      const prevTs =
+        selectedIndex > 0
+          ? new Date(assistantMessages[selectedIndex - 1].createdAt as any).getTime()
+          : -Infinity;
+
+      return allAgentSteps.filter((step) => {
+        const stepTs = getStepTimestamp(step);
+        if (stepTs == null) return false;
+        return stepTs > prevTs && stepTs <= selectedTs;
+      });
+    };
+
     if (scopeMessageId) {
       const explicit = allAgentSteps.filter((step) => step.messageId === scopeMessageId);
       if (explicit.length > 0) return explicit;
+      const isExplicitHistoricalSelection = selectedMessageId === scopeMessageId;
+      if (isExplicitHistoricalSelection) {
+        const inferred = inferScopedStepsByAssistantWindow(scopeMessageId);
+        if (inferred.length > 0) return inferred;
+      }
       if (!hasMessageScopedSteps && messages.filter((message) => message.role === 'assistant').length <= 1) {
         return allAgentSteps;
       }
@@ -321,7 +357,7 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
       if (inFlight.length > 0) return inFlight;
     }
     return [];
-  }, [allAgentSteps, scopeMessageId, isSessionStreaming, agentRunStartIndex, messages]);
+  }, [allAgentSteps, scopeMessageId, selectedMessageId, isSessionStreaming, agentRunStartIndex, messages]);
   const scopedIndices = useMemo(
     () => scopedAgentSteps.map((step) => allAgentSteps.indexOf(step)),
     [allAgentSteps, scopedAgentSteps]
@@ -350,7 +386,10 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
   const isAtLatestAgentStep = agentSteps.length === 0 || agentCurrentIndex >= agentSteps.length - 1;
 
   const hasAgentTimeline = agentSteps.length > 0;
-  const hasReplayTimeline = hasAgentTimeline || browserActions.length > 0;
+  const allowStandaloneBrowserTimeline =
+    isSessionStreaming || (!scopeMessageId && browserActions.length > 0);
+  const hasReplayTimeline =
+    hasAgentTimeline || (allowStandaloneBrowserTimeline && browserActions.length > 0);
   const stackedContainerClass = compact ? 'space-y-3 pr-1' : 'space-y-4';
   const replaySurfaceClass = compact
     ? 'flex min-h-0 flex-1 flex-col'

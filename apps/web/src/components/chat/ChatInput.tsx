@@ -61,8 +61,8 @@ export function ChatInput({ onSend, disabled, sendDisabled, onStop, onOpenSkills
   };
 
   return (
-    <div className="bg-background/90 pb-2 backdrop-blur">
-      <div className="px-4 pt-4 md:px-6">
+    <div className="w-full bg-background/90 pb-2 backdrop-blur">
+      <div className="mx-auto w-full max-w-[1400px] px-4 pt-4 md:px-6">
         <div className="flex items-center gap-2 rounded-3xl border border-muted/40 bg-white px-4 py-3 shadow-sm transition-colors focus-within:border-muted/60 dark:bg-neutral-900">
           <button
             type="button"

@@ -150,6 +150,7 @@ export function useSessionMessages(sessionId: string | undefined) {
   const upsertToolCall = useChatStore((state) => state.upsertToolCall);
   const appendAgentStep = useChatStore((state) => state.appendAgentStep);
   const clearAgentSteps = useChatStore((state) => state.clearAgentSteps);
+  const updateAgentStepAt = useChatStore((state) => state.updateAgentStepAt);
   const addReasoningStep = useChatStore((state) => state.addReasoningStep);
   const clearReasoningSteps = useChatStore((state) => state.clearReasoningSteps);
 
@@ -213,7 +214,8 @@ export function useSessionMessages(sessionId: string | undefined) {
       }
 
       // Hydrate "Computer" replay timeline from persisted tool calls.
-      // If local timeline is partial (e.g., after relogin), replace it with fuller DB reconstruction.
+      // Only bootstrap when timeline is empty; never clobber an existing rich local timeline.
+      // Existing timelines can include screenshots captured from browser events that DB fallback cannot recover.
       try {
         const persistedToolCalls = Array.from(persistedToolCallsById.values()).filter(
           (tc) => (tc?.sessionId ?? sessionId) === sessionId
@@ -222,25 +224,48 @@ export function useSessionMessages(sessionId: string | undefined) {
 
         const existingTimeline = useChatStore.getState().agentSteps.get(sessionId);
         const existingSteps = existingTimeline?.steps ?? [];
-        const hasSameTimeline =
-          reconstructedSteps.length === existingSteps.length &&
-          reconstructedSteps.every((step, index) => {
-            const existing = existingSteps[index];
-            if (!existing) return false;
-            return (
-              step.type === existing.type &&
-              (step.output ?? '') === (existing.output ?? '') &&
-              (step.snapshot?.url ?? '') === (existing.snapshot?.url ?? '') &&
-              (step.snapshot?.metadata?.actionDescription ?? '') ===
-                (existing.snapshot?.metadata?.actionDescription ?? '')
-            );
-          });
-
-        if (!hasSameTimeline) {
+        if (existingSteps.length === 0) {
           clearAgentSteps(sessionId);
           for (const step of reconstructedSteps) {
             appendAgentStep(sessionId, step);
           }
+        } else if (reconstructedSteps.length > 0) {
+          // Reconcile messageId on existing steps using reconstructed signatures.
+          // This keeps historical scoping stable and repairs prior mis-associations
+          // without replacing snapshots.
+          const signatureForStep = (step: AgentStep) =>
+            [
+              step.type,
+              step.output ?? '',
+              step.snapshot?.url ?? '',
+              step.snapshot?.metadata?.actionDescription ?? '',
+            ].join('|');
+
+          const messageIdsBySignature = new Map<string, string[]>();
+          for (const reconstructed of reconstructedSteps) {
+            if (!reconstructed.messageId) continue;
+            const signature = signatureForStep(reconstructed);
+            const existing = messageIdsBySignature.get(signature) ?? [];
+            existing.push(reconstructed.messageId);
+            messageIdsBySignature.set(signature, existing);
+          }
+
+          const signatureCursor = new Map<string, number>();
+          existingSteps.forEach((existingStep, index) => {
+            if (existingStep.messageId) return;
+            const signature = signatureForStep(existingStep);
+            const candidates = messageIdsBySignature.get(signature);
+            if (!candidates || candidates.length === 0) return;
+
+            const cursor = signatureCursor.get(signature) ?? 0;
+            const safeCursor = Math.min(cursor, candidates.length - 1);
+            signatureCursor.set(signature, cursor + 1);
+
+            const inferredMessageId = candidates[safeCursor];
+            if (!inferredMessageId) return;
+
+            updateAgentStepAt(sessionId, index, { messageId: inferredMessageId });
+          });
         }
       } catch {
         // Best-effort only; never block message loading.

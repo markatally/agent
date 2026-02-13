@@ -72,6 +72,10 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
     // Connect to SSE stream
     const cleanup = client.connect(streamUrl, {
       onEvent: (event: StreamEvent) => {
+        if (event.sessionId && event.sessionId !== sessionId) {
+          return;
+        }
+
         // Reset idle timeout on any event
         resetIdleTimeout();
 
@@ -130,6 +134,7 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
           case 'tool.progress':
             if (event.data) {
               updateToolCallProgress(
+                sessionId,
                 event.data.toolCallId,
                 event.data.current || 0,
                 event.data.total || 100,
@@ -146,7 +151,7 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
                 duration: event.data.duration || 0,
                 artifacts: event.data.artifacts,
               };
-              completeToolCall(event.data.toolCallId, toolResult);
+              completeToolCall(sessionId, event.data.toolCallId, toolResult);
               completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
             }
             break;
@@ -159,7 +164,7 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
                 error: event.data.error || 'Unknown error',
                 duration: event.data.duration || 0,
               };
-              completeToolCall(event.data.toolCallId, toolResult);
+              completeToolCall(sessionId, event.data.toolCallId, toolResult);
               completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
             }
             break;
