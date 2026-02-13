@@ -61,6 +61,7 @@ import { apiDocsSkill } from './documentation/api-docs';
 import { changelogSkill } from './documentation/changelog';
 import { analyzeSkill } from './analysis/analyze';
 import { securitySkill } from './analysis/security';
+import { paperReadSkill } from './analysis/paper-read';
 import { scrapeSkill } from './web/scrape';
 import { searchSkill } from './web/search';
 import { dataSkill } from './data/data';
@@ -68,6 +69,7 @@ import { sqlSkill } from './data/sql';
 import { mcpSkill } from './integration/mcp';
 import { planSkill } from './planning/plan';
 import { architectSkill } from './planning/architect';
+import { paperWriteSkill } from './documentation/paper-write';
 
 // Skill registry
 export const skills: Map<string, Skill> = new Map([
@@ -101,9 +103,12 @@ export const skills: Map<string, Skill> = new Map([
   // Analysis
   ['analyze', analyzeSkill],
   ['security', securitySkill],
+  ['paper-read', paperReadSkill],
   // Web
   ['scrape', scrapeSkill],
   ['search', searchSkill],
+  // Academic writing
+  ['paper-write', paperWriteSkill],
   // Data
   ['data', dataSkill],
   ['sql', sqlSkill],

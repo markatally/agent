@@ -42,11 +42,6 @@ test.describe('Inspector computer viewport and step screenshots', () => {
     await newChatBtn.click();
     await page.waitForURL(/\/chat\/[^/]+/, { timeout: 15000 });
 
-    const computerSwitch = page.getByRole('switch', { name: /toggle computer mode/i });
-    if ((await computerSwitch.getAttribute('data-state')) === 'unchecked') {
-      await computerSwitch.click();
-    }
-
     await openInspector(page);
 
     const placeholder = page.locator('[data-testid="computer-viewport-placeholder"]');
@@ -71,11 +66,6 @@ test.describe('Inspector computer viewport and step screenshots', () => {
 
     const chatInput = page.locator('[data-testid="chat-input"]');
     await expect(chatInput).toBeVisible({ timeout: 10000 });
-
-    const computerSwitch = page.getByRole('switch', { name: /toggle computer mode/i });
-    if ((await computerSwitch.getAttribute('data-state')) === 'unchecked') {
-      await computerSwitch.click();
-    }
 
     await chatInput.fill('Make a 1-slide PPT about cats.');
     await chatInput.press('Enter');

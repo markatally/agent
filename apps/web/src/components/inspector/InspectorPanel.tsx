@@ -119,7 +119,6 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
     : hasFailedToolCall
       ? 'Failed'
       : 'Completed';
-  const computerSectionExpanded = computerExpanded || computerBodyMounted;
 
   return (
     <aside
@@ -150,10 +149,7 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
             {sessionId ? (
               <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto overflow-x-hidden p-3">
                 <section
-                  className={cn(
-                    'flex min-w-0 flex-col rounded-lg border border-border/70 bg-card/90 shadow-sm',
-                    computerSectionExpanded && 'flex-1 min-h-0'
-                  )}
+                  className="flex min-w-0 flex-col rounded-lg border border-border/70 bg-card/90 shadow-sm"
                 >
                   <button
                     type="button"

@@ -226,7 +226,7 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
 
   const hasAgentTimeline = agentSteps.length > 0;
   const hasReplayTimeline = hasAgentTimeline || browserActions.length > 0;
-  const stackedContainerClass = compact ? 'h-full space-y-3 overflow-y-auto pr-1' : 'space-y-4';
+  const stackedContainerClass = compact ? 'space-y-3 pr-1' : 'space-y-4';
   const replaySurfaceClass = compact
     ? 'flex min-h-0 flex-1 flex-col'
     : 'flex min-h-0 flex-1 flex-col rounded-xl border bg-muted/10';
@@ -248,8 +248,9 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
         getLatestBrowserActionScreenshot(browserActions)
       : browserActions[browserCurrentIndex]?.screenshotDataUrl ??
         getLatestBrowserActionScreenshot(browserActions);
+    const shouldRenderReplayViewport = replayLive || Boolean(replaySnapshot);
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-col">
         <section className={replaySurfaceClass}>
           <div className={replayContentClass}>
             {!compact ? <div className="pt-3" /> : null}
@@ -261,15 +262,25 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
               isLive={replayLive}
               showLiveIndicator={false}
             />
-            <BrowserViewport
-              sessionId={sessionId}
-              enabled={isBrowserMode}
-              snapshotUrl={replaySnapshot}
-              showLive={replayLive}
-              fillHeight
-              minHeight={0}
-              className="flex-1 min-h-0"
-            />
+            {shouldRenderReplayViewport ? (
+              <BrowserViewport
+                sessionId={sessionId}
+                enabled={isBrowserMode && replayLive}
+                snapshotUrl={replaySnapshot}
+                showLive={replayLive}
+                fillHeight
+                minHeight={0}
+                className="flex-1 min-h-0"
+              />
+            ) : (
+              <div
+                data-testid="computer-viewport-placeholder"
+                className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
+                style={{ aspectRatio: 16 / 9 }}
+              >
+                Snapshot unavailable for this step. Agent execution continued without blocking.
+              </div>
+            )}
             <TimelineScrubber
               currentIndex={replayIndex}
               totalSteps={replayTotal}
@@ -299,14 +310,6 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
               stepLabel="Step"
               className={timelineControlsClass}
             />
-            {!replaySnapshot && (
-              <div
-                data-testid="computer-viewport-placeholder"
-                className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
-              >
-                Snapshot unavailable for this step. Agent execution continued without blocking.
-              </div>
-            )}
           </div>
         </section>
       </div>
@@ -321,7 +324,7 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
     const isLive = isSessionStreaming && currentStepStatus === 'running';
 
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-col">
         <section className={replaySurfaceClass}>
           <div className={replayContentClass}>
             {!compact ? <div className="pt-3" /> : null}
@@ -359,6 +362,7 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
               const timelineIndex = hasTimeline ? agentCurrentIndex : browserCurrentIndex;
               const timelineTotal = hasTimeline ? agentSteps.length : browserActions.length;
               const timelineIsLive = isSessionStreaming && (hasTimeline ? isAtLatestAgentStep : isAtLatestAction);
+              const shouldRenderTimelineViewport = timelineIsLive || Boolean(viewportSnapshot);
               return (
                 <>
                   <BrowserToolbar
@@ -376,15 +380,25 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
                   />
                   {hasBrowser ? (
                     <>
-                      <BrowserViewport
-                        sessionId={sessionId}
-                        enabled={isBrowserMode}
-                        snapshotUrl={viewportSnapshot}
-                        showLive={isLive && timelineIsLive}
-                        fillHeight
-                        minHeight={0}
-                        className="flex-1 min-h-0"
-                      />
+                      {shouldRenderTimelineViewport ? (
+                        <BrowserViewport
+                          sessionId={sessionId}
+                          enabled={isBrowserMode && timelineIsLive}
+                          snapshotUrl={viewportSnapshot}
+                          showLive={isLive && timelineIsLive}
+                          fillHeight
+                          minHeight={0}
+                          className="flex-1 min-h-0"
+                        />
+                      ) : (
+                        <div
+                          data-testid="computer-viewport-placeholder"
+                          className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
+                          style={{ aspectRatio: 16 / 9 }}
+                        >
+                          Snapshot unavailable for this step. Agent execution continued without blocking.
+                        </div>
+                      )}
                       {timelineTotal > 0 && (
                         <TimelineScrubber
                           currentIndex={timelineIndex}
@@ -415,14 +429,6 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
                           stepLabel="Step"
                           className={timelineControlsClass}
                         />
-                      )}
-                      {!viewportSnapshot && (
-                        <div
-                          data-testid="computer-viewport-placeholder"
-                          className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
-                        >
-                          Snapshot unavailable for this step. Agent execution continued without blocking.
-                        </div>
                       )}
                     </>
                   ) : browseResults.length > 0 ? (
@@ -573,24 +579,15 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
     return (
       <div className={stackedContainerClass}>
         <section className={cn(compact ? 'rounded-md' : 'rounded-xl border bg-muted/10')}>
-          <div className={cn('space-y-3', compact ? 'px-1 py-1' : 'px-4 pb-4 pt-3')}>
-            <BrowserToolbar
-              status="closed"
-              currentUrl=""
-              actionLabel="Idle"
-              isLive={false}
-              displayLabel="Output ready"
-            />
-            <BrowserViewport
-              sessionId={sessionId}
-              enabled={false}
-              showLive={false}
-            />
+          <div className={cn('space-y-2', compact ? 'px-1 py-1' : 'px-4 pb-4 pt-3')}>
             <div
-              data-testid="computer-viewport-placeholder"
-              className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
+              data-testid="computer-empty-state"
+              className="rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center"
             >
-              No page snapshots yet. Computer playback will appear automatically when tools view pages.
+              <p className="text-sm font-medium text-muted-foreground">No computer activity yet</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Computer playback appears only after browser or tool execution starts.
+              </p>
             </div>
           </div>
         </section>

@@ -571,6 +571,28 @@ export function classifyNavigationFailure(input: {
   return 'unknown';
 }
 
+export function shouldAcceptSoftHttpErrorAsReadablePage(input: {
+  statusCode: number;
+  title?: string;
+  loadedUrl?: string;
+  html?: string;
+}): boolean {
+  const statusCode = input.statusCode;
+  if (statusCode !== 401 && statusCode !== 403 && statusCode !== 451) {
+    return false;
+  }
+  if (!input.html || input.html.length < 200) return false;
+  if (isHumanVerificationWall(input.title, input.loadedUrl, input.html)) {
+    return false;
+  }
+  const articleSignalScore = scoreLikelyArticleContent(
+    (input.title ?? '').toLowerCase(),
+    (input.loadedUrl ?? '').toLowerCase(),
+    input.html.toLowerCase()
+  );
+  return articleSignalScore >= 7;
+}
+
 function computeRetryBackoffMs(failureClass: WebFetchFailureClass, attemptIndex: number): number {
   return computeRetryBackoffMsWithPolicy(failureClass, attemptIndex, DEFAULT_DOMAIN_POLICY);
 }
@@ -695,31 +717,7 @@ export async function navigateWebSearchEntryWithFallback(
         waitUntil: 'domcontentloaded',
         timeout: policy.navTimeoutMs,
       });
-      if (response) {
-        const status = response.status();
-        if (status >= 400) {
-          const failureClass = classifyNavigationFailure({ statusCode: status });
-          finalFailureClass = failureClass;
-          errors.push(`${attempt.reason}:${failureClass}:http-${status}`);
-          attemptDiagnostics.push({
-            target: attempt.target,
-            reason: attempt.reason,
-            startedAt,
-            finishedAt: Date.now(),
-            durationMs: Date.now() - startedAt,
-            success: false,
-            statusCode: status,
-            failureClass,
-            message: `HTTP ${status}`,
-          });
-          recordAttemptOutcome(attempt.target, false, failureClass);
-          if (attemptIndex < attempts.length - 1) {
-            const backoffMs = computeRetryBackoffMsWithPolicy(failureClass, attemptIndex, policy);
-            if (backoffMs > 0) await sleep(backoffMs);
-          }
-          continue;
-        }
-      }
+      const responseStatus = response?.status();
       await sleep(policy.settleDelayMs);
       const pageTitle = await page.title().catch(() => undefined);
       const loadedUrl = page.url();
@@ -747,6 +745,43 @@ export async function navigateWebSearchEntryWithFallback(
         }
         continue;
       }
+      if (responseStatus != null && responseStatus >= 400) {
+        const softAccepted = shouldAcceptSoftHttpErrorAsReadablePage({
+          statusCode: responseStatus,
+          title: pageTitle,
+          loadedUrl,
+          html,
+        });
+        if (!softAccepted) {
+          const failureClass = classifyNavigationFailure({
+            statusCode: responseStatus,
+            title: pageTitle,
+            loadedUrl,
+            html,
+          });
+          finalFailureClass = failureClass;
+          errors.push(`${attempt.reason}:${failureClass}:http-${responseStatus}`);
+          attemptDiagnostics.push({
+            target: attempt.target,
+            reason: attempt.reason,
+            startedAt,
+            finishedAt: Date.now(),
+            durationMs: Date.now() - startedAt,
+            success: false,
+            statusCode: responseStatus,
+            loadedUrl,
+            title: pageTitle,
+            failureClass,
+            message: `HTTP ${responseStatus}`,
+          });
+          recordAttemptOutcome(attempt.target, false, failureClass);
+          if (attemptIndex < attempts.length - 1) {
+            const backoffMs = computeRetryBackoffMsWithPolicy(failureClass, attemptIndex, policy);
+            if (backoffMs > 0) await sleep(backoffMs);
+          }
+          continue;
+        }
+      }
       recordAttemptOutcome(attempt.target, true);
       attemptDiagnostics.push({
         target: attempt.target,
@@ -755,6 +790,7 @@ export async function navigateWebSearchEntryWithFallback(
         finishedAt: Date.now(),
         durationMs: Date.now() - startedAt,
         success: true,
+        statusCode: responseStatus,
         loadedUrl,
         title: pageTitle,
         failureClass: 'none',

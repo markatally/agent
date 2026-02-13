@@ -143,6 +143,7 @@ export function useSessionMessages(sessionId: string | undefined) {
   const setFileArtifacts = useChatStore((state) => state.setFileArtifacts);
   const upsertToolCall = useChatStore((state) => state.upsertToolCall);
   const appendAgentStep = useChatStore((state) => state.appendAgentStep);
+  const clearAgentSteps = useChatStore((state) => state.clearAgentSteps);
   const addReasoningStep = useChatStore((state) => state.addReasoningStep);
   const clearReasoningSteps = useChatStore((state) => state.clearReasoningSteps);
 
@@ -214,8 +215,23 @@ export function useSessionMessages(sessionId: string | undefined) {
         const reconstructedSteps = reconstructAgentStepsFromToolCalls(persistedToolCalls);
 
         const existingTimeline = useChatStore.getState().agentSteps.get(sessionId);
-        if (reconstructedSteps.length > (existingTimeline?.steps.length ?? 0)) {
-          useChatStore.getState().clearAgentSteps(sessionId);
+        const existingSteps = existingTimeline?.steps ?? [];
+        const hasSameTimeline =
+          reconstructedSteps.length === existingSteps.length &&
+          reconstructedSteps.every((step, index) => {
+            const existing = existingSteps[index];
+            if (!existing) return false;
+            return (
+              step.type === existing.type &&
+              (step.output ?? '') === (existing.output ?? '') &&
+              (step.snapshot?.url ?? '') === (existing.snapshot?.url ?? '') &&
+              (step.snapshot?.metadata?.actionDescription ?? '') ===
+                (existing.snapshot?.metadata?.actionDescription ?? '')
+            );
+          });
+
+        if (!hasSameTimeline) {
+          clearAgentSteps(sessionId);
           for (const step of reconstructedSteps) {
             appendAgentStep(sessionId, step);
           }

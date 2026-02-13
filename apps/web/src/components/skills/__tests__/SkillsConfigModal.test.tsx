@@ -326,6 +326,56 @@ describe('SkillsConfigModal - Scope and Filters', () => {
     });
   });
 
+  it('deduplicates visually identical skills in counts and list', async () => {
+    (useUserSkills as any).mockReturnValue({
+      data: { skills: [] },
+      isLoading: false,
+    });
+
+    (useUpdateUserSkills as any).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    });
+
+    (apiClient.externalSkills.list as any).mockResolvedValue({
+      skills: [
+        {
+          canonicalId: 'pptx-openai',
+          name: 'pptx',
+          description: 'Use this skill any time a .pptx file is involved',
+          category: 'presentation',
+          source: { repoUrl: 'https://github.com/openai/skills' },
+        },
+        {
+          canonicalId: 'pptx-duplicate',
+          name: 'pptx',
+          description: 'Use this skill any time a .pptx file is involved',
+          category: 'presentation',
+          source: { repoUrl: 'https://github.com/openai/skills' },
+        },
+        {
+          canonicalId: 'other-skill',
+          name: 'Spreadsheet Helper',
+          description: 'Work with tabular files',
+          category: 'data',
+          source: { repoUrl: '' },
+        },
+      ],
+    });
+
+    render(
+      <SkillsConfigModal open={true} onOpenChange={() => {}} />,
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('All (2)')).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByText('pptx')).toHaveLength(1);
+    expect(screen.getByText('Spreadsheet Helper')).toBeInTheDocument();
+  });
+
   it('should render tabs with correct scope and show contextual filters', async () => {
     const mockUserSkills = [
       { canonicalId: 'skill-1', enabled: true, addedAt: new Date(), updatedAt: new Date() },

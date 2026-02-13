@@ -6,6 +6,7 @@ import {
   extractWebSearchEntries,
   isHumanVerificationWall,
   classifyNavigationFailure,
+  shouldAcceptSoftHttpErrorAsReadablePage,
   resolveDomainNavigationPolicy,
 } from '../../apps/api/src/services/browser/orchestrator';
 
@@ -257,6 +258,55 @@ describe('browser/orchestrator web-search snapshot helpers', () => {
     expect(classifyNavigationFailure({ errorMessage: 'Navigation timeout of 15000ms exceeded' })).toBe(
       'timeout'
     );
+  });
+
+  it('accepts soft 403 pages when article signals are strong and no challenge markers appear', () => {
+    const accepted = shouldAcceptSoftHttpErrorAsReadablePage({
+      statusCode: 403,
+      title: 'Big Tech to Spend $650 Billion This Year as AI Race Intensifies',
+      loadedUrl:
+        'https://www.bloomberg.com/news/articles/2026-02-06/how-much-is-big-tech-spending-on-ai-computing-a-staggering-650-billion-in-2026',
+      html: `
+      <html>
+        <head>
+          <meta property="og:type" content="article" />
+          <meta property="og:title" content="Big Tech to Spend $650 Billion This Year as AI Race Intensifies" />
+          <meta property="og:site_name" content="Bloomberg" />
+          <meta name="twitter:card" content="summary_large_image" />
+          <script type="application/ld+json">{"@type":"NewsArticle"}</script>
+        </head>
+        <body>
+          <main>
+            <article>
+              <p>Four of the biggest US technology companies together have forecast capital expenditures approaching $650 billion in 2026.</p>
+              <p>The spending wave includes large investments in data centers, networking, and AI computing infrastructure.</p>
+              <p>Investors are assessing whether revenue growth can match the pace of infrastructure commitments.</p>
+              <p>Analysts expect enterprise demand to stay strong as model training and inference workloads scale.</p>
+              <p>Executives said the capex cycle will likely extend beyond a single fiscal year.</p>
+            </article>
+          </main>
+        </body>
+      </html>
+      `,
+    });
+    expect(accepted).toBe(true);
+  });
+
+  it('rejects soft 403 pages when content indicates blocked access', () => {
+    const accepted = shouldAcceptSoftHttpErrorAsReadablePage({
+      statusCode: 403,
+      title: 'Access Denied',
+      loadedUrl: 'https://example.com/protected',
+      html: `
+      <html>
+        <body>
+          <h1>403 Forbidden</h1>
+          <p>Please verify you are a human to continue.</p>
+        </body>
+      </html>
+      `,
+    });
+    expect(accepted).toBe(false);
   });
 
   it('resolves domain-specific navigation policy for known hosts', () => {

@@ -31,6 +31,8 @@ describe('InspectorPanel structure', () => {
     expect(screen.getAllByText('Computer')).toHaveLength(1);
     expect(screen.getAllByText('Reasoning Trace')).toHaveLength(1);
     expect(screen.queryByText('Other Tools')).not.toBeInTheDocument();
+    expect(screen.getByTestId('computer-empty-state')).toBeInTheDocument();
+    expect(screen.queryByText('Browser view is off')).not.toBeInTheDocument();
   });
 
   it('shows Live status when computer is actively running', () => {
@@ -88,14 +90,14 @@ describe('InspectorPanel structure', () => {
 
     render(<InspectorPanel open sessionId="session-1" />);
 
-    expect(screen.getByTestId('computer-viewport-placeholder')).toBeInTheDocument();
+    expect(screen.getByTestId('computer-empty-state')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Computer/i }));
     act(() => {
       vi.advanceTimersByTime(300);
     });
 
-    expect(screen.queryByTestId('computer-viewport-placeholder')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('computer-empty-state')).not.toBeInTheDocument();
     const computerSection = screen.getByText('Computer').closest('section');
     expect(computerSection?.className).not.toContain('flex-1');
 

@@ -59,7 +59,6 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const addExecutionStep = useChatStore((state) => state.addExecutionStep);
   const updateExecutionStep = useChatStore((state) => state.updateExecutionStep);
   const addSandboxFile = useChatStore((state) => state.addSandboxFile);
-  const executionMode = useChatStore((state) => state.executionMode);
   const startPptPipeline = useChatStore((state) => state.startPptPipeline);
   const updatePptStep = useChatStore((state) => state.updatePptStep);
   const addBrowseActivity = useChatStore((state) => state.addBrowseActivity);
@@ -684,8 +683,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       for await (const event of apiClient.chat.sendAndStream(
         sessionId,
         content,
-        abortControllerRef.current.signal,
-        { executionMode }
+        abortControllerRef.current.signal
       )) {
         handleSSEEvent(event);
       }

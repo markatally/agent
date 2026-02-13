@@ -27,6 +27,40 @@ interface SkillsConfigModalProps {
 }
 
 type AvailableSkill = ExternalSkill;
+type CombinedSkill = AvailableSkill & {
+  isInUserSet: boolean;
+  enabled: boolean;
+  addedAt?: string;
+  updatedAt?: string;
+};
+
+function normalizeText(value: string | null | undefined): string {
+  return (value || '').trim().toLowerCase();
+}
+
+function skillDisplayKey(skill: Pick<CombinedSkill, 'name' | 'description' | 'category'>): string {
+  return [
+    normalizeText(skill.name),
+    normalizeText(skill.description),
+    normalizeText(skill.category),
+  ].join('|');
+}
+
+function preferCombinedSkill(a: CombinedSkill, b: CombinedSkill): CombinedSkill {
+  // Prefer skills already in user's set to preserve existing state/actions.
+  if (a.isInUserSet !== b.isInUserSet) return a.isInUserSet ? a : b;
+  // Then prefer enabled entries.
+  if (a.enabled !== b.enabled) return a.enabled ? a : b;
+  // Then prefer official entries (repo-backed metadata).
+  const aOfficial = Boolean(a.source?.repoUrl);
+  const bOfficial = Boolean(b.source?.repoUrl);
+  if (aOfficial !== bOfficial) return aOfficial ? a : b;
+  // Then prefer richer description.
+  const aDescLen = a.description?.length ?? 0;
+  const bDescLen = b.description?.length ?? 0;
+  if (aDescLen !== bDescLen) return aDescLen > bDescLen ? a : b;
+  return a;
+}
 
 export function SkillsConfigModal({ open, onOpenChange }: SkillsConfigModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -61,11 +95,9 @@ export function SkillsConfigModal({ open, onOpenChange }: SkillsConfigModalProps
       return [];
     }
 
-    const userSkillsMap = new Map(
-      userSkillsData.skills.map((s) => [s.canonicalId, s])
-    );
+    const userSkillsMap = new Map(userSkillsData.skills.map((s) => [s.canonicalId, s]));
 
-    return availableSkillsData.skills.map((skill) => {
+    const enriched = availableSkillsData.skills.map((skill) => {
       const userSkill = userSkillsMap.get(skill.canonicalId);
       const pending = pendingChanges.get(skill.canonicalId);
 
@@ -77,6 +109,24 @@ export function SkillsConfigModal({ open, onOpenChange }: SkillsConfigModalProps
         updatedAt: userSkill?.updatedAt,
       };
     });
+
+    // 1) Strict dedupe by canonicalId to avoid accidental repeated rows from source payloads.
+    const byCanonical = new Map<string, CombinedSkill>();
+    for (const skill of enriched) {
+      const existing = byCanonical.get(skill.canonicalId);
+      byCanonical.set(skill.canonicalId, existing ? preferCombinedSkill(existing, skill) : skill);
+    }
+
+    // 2) Soft dedupe by display identity (name+description+category) to collapse
+    // same skill published under multiple canonical IDs.
+    const byDisplay = new Map<string, CombinedSkill>();
+    for (const skill of byCanonical.values()) {
+      const displayKey = skillDisplayKey(skill);
+      const existing = byDisplay.get(displayKey);
+      byDisplay.set(displayKey, existing ? preferCombinedSkill(existing, skill) : skill);
+    }
+
+    return Array.from(byDisplay.values());
   }, [availableSkillsData, userSkillsData, pendingChanges]);
 
   // Filter skills based on scope, quick filters, search, and category

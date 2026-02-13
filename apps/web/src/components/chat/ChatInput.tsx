@@ -2,8 +2,6 @@ import { useState, useRef, KeyboardEvent } from 'react';
 import { ArrowUp, Plus, Square } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
-import { Switch } from '../ui/switch';
-import { useChatStore } from '../../stores/chatStore';
 
 interface ChatInputProps {
   onSend: (content: string) => void;
@@ -17,8 +15,6 @@ export function ChatInput({ onSend, disabled, sendDisabled, onStop, onOpenSkills
   const [message, setMessage] = useState('');
   const [isComposing, setIsComposing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const executionMode = useChatStore((state) => state.executionMode);
-  const setExecutionMode = useChatStore((state) => state.setExecutionMode);
 
   const canSend = !disabled && !sendDisabled && message.trim();
 
@@ -89,14 +85,6 @@ export function ChatInput({ onSend, disabled, sendDisabled, onStop, onOpenSkills
             data-testid="chat-input"
             className="min-h-[52px] max-h-48 flex-1 resize-none border-0 bg-transparent p-1 text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           />
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={executionMode === 'sandbox'}
-              onCheckedChange={(checked) => setExecutionMode(checked ? 'sandbox' : 'direct')}
-              aria-label="Toggle computer mode"
-            />
-            <span className="text-xs text-muted-foreground">Computer</span>
-          </div>
           {sendDisabled && onStop ? (
             <Button
               onClick={onStop}
