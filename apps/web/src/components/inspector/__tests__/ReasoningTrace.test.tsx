@@ -153,10 +153,10 @@ describe('ReasoningTrace (Inspector)', () => {
     expect(screen.getByText('Step 2: Generate Answer')).toBeInTheDocument();
     expect(screen.getByText('Step 3: Tool Step')).toBeInTheDocument();
     const toolStepButton = screen.getByRole('button', { name: /Step 3: Tool Step/i });
-    const toolStepHeader = toolStepButton.firstElementChild as HTMLElement;
-    const durationColumn = toolStepHeader.lastElementChild as HTMLElement;
-    expect(durationColumn.className).toContain('w-14');
-    expect(durationColumn.querySelector('svg')).toBeNull();
+    const durationColumn = toolStepButton.parentElement?.querySelector('.w-20') as HTMLElement | null;
+    expect(durationColumn).toBeTruthy();
+    expect(durationColumn?.querySelector('svg')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Details' })).toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: /Query/i })).not.toBeInTheDocument();
     expect(screen.queryByText('Sources (1)')).not.toBeInTheDocument();
@@ -375,5 +375,89 @@ describe('ReasoningTrace (Inspector)', () => {
     await userEvent.click(screen.getByRole('button', { name: /Step 2: Tool Step/i }));
     await userEvent.click(screen.getByRole('button', { name: /Sources \(2\)/i }));
     expect(screen.getAllByRole('link')).toHaveLength(2);
+  });
+
+  it('removes duplicate tool phases with identical tool signatures from the timeline', () => {
+    const sessionId = 'session-duplicate-tool-phases';
+    const now = Date.now();
+
+    useChatStore.setState({
+      messages: new Map([
+        [
+          sessionId,
+          [
+            {
+              id: 'assistant-duplicate-tools',
+              sessionId,
+              role: 'assistant',
+              content: 'answer',
+              createdAt: new Date(now),
+            },
+          ],
+        ],
+      ]),
+      reasoningSteps: new Map([
+        [
+          sessionId,
+          [
+            {
+              stepId: 'tool-missing-1',
+              label: 'Searching',
+              status: 'completed',
+              startedAt: now - 2000,
+              completedAt: now - 1500,
+              durationMs: 500,
+            },
+            {
+              stepId: 'tool-missing-2',
+              label: 'Searching',
+              status: 'completed',
+              startedAt: now - 1400,
+              completedAt: now - 900,
+              durationMs: 500,
+            },
+          ],
+        ],
+      ]),
+      toolCalls: new Map([
+        [
+          'tc-dupe-1',
+          {
+            sessionId,
+            toolCallId: 'tc-dupe-1',
+            toolName: 'web_search',
+            status: 'completed',
+            params: { query: 'duplicate tool trace' },
+            result: {
+              success: true,
+              output: 'https://example.com/a',
+              duration: 15,
+              artifacts: [],
+            },
+          },
+        ],
+        [
+          'tc-dupe-2',
+          {
+            sessionId,
+            toolCallId: 'tc-dupe-2',
+            toolName: 'web_search',
+            status: 'completed',
+            params: { query: 'duplicate tool trace' },
+            result: {
+              success: true,
+              output: 'https://example.com/a',
+              duration: 15,
+              artifacts: [],
+            },
+          },
+        ],
+      ]),
+    });
+
+    render(<ReasoningTrace sessionId={sessionId} />);
+
+    const toolSteps = screen.getAllByText(/Step \d+: Tool Step/i);
+    expect(toolSteps).toHaveLength(1);
   });
 });

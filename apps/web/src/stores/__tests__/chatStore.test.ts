@@ -11,6 +11,7 @@ describe('chatStore', () => {
       streamingContent: '',
       isStreaming: false,
       toolCalls: new Map(),
+      agentRunStartIndex: new Map(),
     });
   });
 
@@ -386,6 +387,57 @@ describe('chatStore', () => {
       useChatStore.getState().loadComputerStateFromStorage(sessionId);
       const state = useChatStore.getState();
       expect(state.agentSteps.get(sessionId)?.steps[0]?.snapshot?.screenshot).toBeUndefined();
+    });
+  });
+
+  describe('agent step message association', () => {
+    it('associates only unassigned agent steps to completed assistant message', () => {
+      const sessionId = 'session-associate';
+      useChatStore.setState({
+        agentSteps: new Map([
+          [
+            sessionId,
+            {
+              currentStepIndex: 2,
+              steps: [
+                { stepIndex: 0, type: 'search', output: 'old', messageId: 'msg-old' },
+                { stepIndex: 1, type: 'browse', output: 'current-1' },
+                { stepIndex: 2, type: 'browse', output: 'current-2' },
+              ],
+            },
+          ],
+        ]),
+      });
+
+      useChatStore.getState().associateAgentStepsWithMessage(sessionId, 'msg-new');
+
+      const steps = useChatStore.getState().agentSteps.get(sessionId)?.steps ?? [];
+      expect(steps[0]?.messageId).toBe('msg-old');
+      expect(steps[1]?.messageId).toBe('msg-new');
+      expect(steps[2]?.messageId).toBe('msg-new');
+    });
+  });
+
+  describe('agent run start index', () => {
+    it('marks run start at current step count for a session', () => {
+      const sessionId = 'session-run-start';
+      useChatStore.setState({
+        agentSteps: new Map([
+          [
+            sessionId,
+            {
+              currentStepIndex: 1,
+              steps: [
+                { stepIndex: 0, type: 'search', output: 'a' },
+                { stepIndex: 1, type: 'browse', output: 'b' },
+              ],
+            },
+          ],
+        ]),
+      });
+
+      useChatStore.getState().setAgentRunStartIndex(sessionId);
+      expect(useChatStore.getState().agentRunStartIndex.get(sessionId)).toBe(2);
     });
   });
 });

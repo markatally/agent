@@ -62,7 +62,7 @@ export function ChatInput({ onSend, disabled, sendDisabled, onStop, onOpenSkills
 
   return (
     <div className="bg-background/90 pb-2 backdrop-blur">
-      <div className="mx-auto w-full max-w-3xl px-4 pt-4">
+      <div className="px-4 pt-4 md:px-6">
         <div className="flex items-center gap-2 rounded-3xl border border-muted/40 bg-white px-4 py-3 shadow-sm transition-colors focus-within:border-muted/60 dark:bg-neutral-900">
           <button
             type="button"
@@ -83,7 +83,7 @@ export function ChatInput({ onSend, disabled, sendDisabled, onStop, onOpenSkills
             placeholder="Ask anything"
             disabled={disabled}
             data-testid="chat-input"
-            className="min-h-[52px] max-h-48 flex-1 resize-none border-0 bg-transparent p-1 text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+            className="min-h-[52px] text-xl max-h-48 flex-1 resize-none border-0 bg-transparent p-1 text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           />
           {sendDisabled && onStop ? (
             <Button

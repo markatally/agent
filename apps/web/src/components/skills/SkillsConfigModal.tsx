@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { X, Search, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { Search, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Dialog,
@@ -11,14 +11,13 @@ import {
 } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { ScrollArea } from '../ui/scroll-area';
 import { Switch } from '../ui/switch';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '../ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { useToast } from '../../hooks/use-toast';
 import { useUserSkills, useUpdateUserSkills } from '../../hooks/useUserSkills';
-import { apiClient, type UserSkill, type ExternalSkill } from '../../lib/api';
+import { apiClient, type ExternalSkill } from '../../lib/api';
 import { useQuery } from '@tanstack/react-query';
 
 interface SkillsConfigModalProps {

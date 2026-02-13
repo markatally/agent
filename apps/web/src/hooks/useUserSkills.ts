@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { userSkillsApi, type UserSkill } from '../lib/api';
+import { userSkillsApi } from '../lib/api';
 
 /**
  * Hook to fetch user's skill preferences

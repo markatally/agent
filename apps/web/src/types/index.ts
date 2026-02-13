@@ -136,6 +136,7 @@ export interface StepSnapshot {
 
 export interface AgentStep {
   stepIndex: number;
+  messageId?: string;
   type: 'browse' | 'search' | 'tool' | 'finalize';
   snapshot?: StepSnapshot;
   output?: string;

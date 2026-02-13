@@ -87,6 +87,7 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
   }, [isResizing, handleMouseMove, handleMouseUp]);
 
   const isSessionStreaming = !!sessionId && isStreaming && streamingSessionId === sessionId;
+  const isViewingHistorical = Boolean(selectedMessageId);
   const selectedMessageKey = selectedMessageId ? `msg-${selectedMessageId}` : null;
   const latestAssistantMessageWithTrace = [...messages]
     .reverse()
@@ -101,6 +102,10 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
   const reasoningSteps = reasoningKey ? reasoningMap.get(reasoningKey) || [] : [];
   const hasRunningReasoning = reasoningSteps.some((step) => step.status === 'running');
   const hasFailedExecution = executionSteps.some((step) => step.status === 'failed');
+  const hasComputerActivity =
+    executionSteps.length > 0 ||
+    Boolean(browserSession) ||
+    (browserSession?.actions?.length ?? 0) > 0;
   const sessionToolCalls = sessionId
     ? Array.from(toolCalls.values()).filter((call) => {
         if (call.sessionId !== sessionId) return false;
@@ -109,11 +114,13 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
       })
     : [];
   const hasFailedToolCall = sessionToolCalls.some((call) => call.status === 'failed');
-  const computerStatusLabel = isSessionStreaming || browserSession?.status === 'launching'
+  const computerStatusLabel = (!isViewingHistorical && isSessionStreaming) || browserSession?.status === 'launching'
     ? 'Live'
     : hasFailedExecution
       ? 'Failed'
-      : 'Completed';
+      : hasComputerActivity
+        ? 'Completed'
+        : 'Idle';
   const reasoningStatusLabel = hasRunningReasoning
     ? 'Running'
     : hasFailedToolCall
@@ -171,7 +178,8 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
                           'h-2 w-2 rounded-full',
                           computerStatusLabel === 'Live' && 'bg-red-500',
                           computerStatusLabel === 'Completed' && 'bg-emerald-500',
-                          computerStatusLabel === 'Failed' && 'bg-destructive'
+                          computerStatusLabel === 'Failed' && 'bg-destructive',
+                          computerStatusLabel === 'Idle' && 'bg-muted-foreground/50'
                         )}
                       />
                       {computerStatusLabel}

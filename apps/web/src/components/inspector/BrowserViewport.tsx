@@ -6,7 +6,6 @@ import {
   type ViewportSizingMode,
   getMediaObjectFit,
   getViewportContainerStyle,
-  resolveAspectRatio,
 } from './viewportSizing';
 
 interface BrowserViewportProps {
@@ -50,11 +49,9 @@ export function BrowserViewport({
       }),
     [fillHeight, minHeight, sizingMode, sourceDimensions]
   );
-  const ratio = resolveAspectRatio(sourceDimensions);
   const mediaObjectFit = getMediaObjectFit(sizingMode);
   const activeSrc = displayLive ? frameDataUrl : snapshotUrl ?? frameDataUrl;
   const isPixelMode = sizingMode === 'pixel';
-  const isFillMode = sizingMode === 'fill';
   const useFitRatioWrapper = sizingMode === 'fit' && fillHeight;
 
   if (!enabled && !snapshotUrl) {

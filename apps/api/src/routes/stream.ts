@@ -541,6 +541,7 @@ async function processAgentTurn(
           output: result.output,
           error: result.error,
           artifacts: result.artifacts,
+          previewSnapshots: result.previewSnapshots,
         });
 
         currentMessages.push({
@@ -562,6 +563,7 @@ async function processAgentTurn(
               error: result.error,
               duration: result.duration,
               artifacts: result.artifacts,
+              previewSnapshots: result.previewSnapshots,
               step: steps + 1,
             },
           }),

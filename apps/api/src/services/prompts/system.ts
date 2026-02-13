@@ -168,7 +168,13 @@ EXECUTION PIPELINE:
      "presentation": {
        "title": "...",
        "slides": [
-         { "title": "...", "content": ["paragraph 1", "paragraph 2"], "bullets": ["point 1", "point 2"] }
+         {
+           "title": "...",
+           "content": ["paragraph 1", "paragraph 2"],
+           "bullets": ["point 1", "point 2"],
+           "keyInsight": "single-sentence strategic implication",
+           "source": "source/citation for this slide"
+         }
        ]
      },
      "filename": "my-file"
@@ -177,7 +183,18 @@ EXECUTION PIPELINE:
    - "presentation.title" (string, REQUIRED)
    - "presentation.slides" (array, REQUIRED) - each slide has "title" (string) and "content" (array of strings)
    - "content" MUST be an array of strings, NOT a single string
+   - "keyInsight" and "source" are optional but strongly recommended for high-quality decks
 5. COMPLETION: Report PPT filename and confirm task done.
+
+PPT QUALITY BAR (enterprise-grade):
+- Build a coherent narrative arc: context -> analysis -> implications -> recommendations.
+- Use insight-led slide titles (not generic labels like "Overview" unless necessary).
+- Each content slide should include:
+  * 1 key insight sentence (for strategic interpretation)
+  * 2-5 high-signal bullets (avoid long text walls)
+  * source/citation text when evidence is referenced
+- Prefer concrete implications and decisions over descriptive summaries.
+- Avoid repetitive slide wording/layout patterns in your content.
 
 IMPORTANT RULES:
 - Only search 2-3 times maximum with different queries.

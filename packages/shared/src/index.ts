@@ -30,6 +30,7 @@ export interface ToolResult {
   error?: string;
   duration: number;
   artifacts?: Artifact[];
+  previewSnapshots?: string[];
   progress?: {
     current: number;
     total: number;

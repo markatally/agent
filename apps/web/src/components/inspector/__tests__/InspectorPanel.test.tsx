@@ -60,6 +60,13 @@ describe('InspectorPanel structure', () => {
     expect(screen.queryByText('Running')).not.toBeInTheDocument();
   });
 
+  it('shows Idle status before any computer activity', () => {
+    render(<InspectorPanel open sessionId="session-1" />);
+
+    expect(screen.queryByText('Live')).not.toBeInTheDocument();
+    expect(screen.getByText('Idle')).toBeInTheDocument();
+  });
+
   it('shows Completed status after computer activity ends', () => {
     useChatStore.setState({
       isStreaming: false,

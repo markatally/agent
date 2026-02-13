@@ -56,7 +56,6 @@ export function RegisterForm() {
   const { register: registerUser } = useAuth();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [password, setPassword] = useState('');
 
   const {
     register,

@@ -7,11 +7,49 @@ import { apiClient, type SSEEvent, ApiError } from '../../lib/api';
 import { useChatStore } from '../../stores/chatStore';
 import { useSession } from '../../hooks/useSessions';
 import { useToast } from '../../hooks/use-toast';
+import {
+  getBrowserActionStepByIndex,
+  getVisitStepByIndex,
+} from './snapshotMapping';
 
 interface ChatContainerProps {
   sessionId: string;
   onOpenSkills?: () => void;
 }
+
+function buildPipelineStageSnapshot(label: string, status: 'running' | 'completed'): string {
+  const bg = status === 'completed' ? '#0F766E' : '#1D4ED8';
+  const badge = status === 'completed' ? '#10B981' : '#60A5FA';
+  const statusText = status === 'completed' ? 'Completed' : 'In Progress';
+  const safeLabel = label.replace(/[<>&"]/g, '');
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${bg}" />
+      <stop offset="100%" stop-color="#0B1220" />
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#g)" />
+  <rect x="76" y="84" rx="24" ry="24" width="1128" height="552" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.25)" stroke-width="2" />
+  <rect x="110" y="124" rx="14" ry="14" width="220" height="48" fill="${badge}" />
+  <text x="220" y="156" font-size="24" text-anchor="middle" fill="#ffffff" font-family="Calibri, Arial, sans-serif" font-weight="700">${statusText}</text>
+  <text x="110" y="270" font-size="54" fill="#ffffff" font-family="Cambria, Georgia, serif" font-weight="700">${safeLabel}</text>
+  <text x="110" y="336" font-size="30" fill="#D6E6FA" font-family="Calibri, Arial, sans-serif">PPT Workflow Stage Snapshot</text>
+  <text x="110" y="592" font-size="22" fill="#C9D7E8" font-family="Calibri, Arial, sans-serif">Computer Mode timeline now tracks full presentation generation flow.</text>
+</svg>
+  `.trim();
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+const PPT_PIPELINE_STAGE_ORDER = [
+  'research',
+  'browsing',
+  'reading',
+  'synthesizing',
+  'generating',
+  'finalizing',
+] as const;
 
 export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const location = useLocation();
@@ -22,6 +60,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const pipelineStageStepIndexRef = useRef<Map<string, number>>(new Map());
 
   // Verify session exists before allowing any operations
   const { data: session, isLoading: isSessionLoading, error: sessionError } = useSession(sessionId);
@@ -71,8 +110,10 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const setBrowserClosed = useChatStore((state) => state.setBrowserClosed);
   const clearBrowserSession = useChatStore((state) => state.clearBrowserSession);
   const appendAgentStep = useChatStore((state) => state.appendAgentStep);
+  const updateAgentStepAt = useChatStore((state) => state.updateAgentStepAt);
   const updateAgentStepSnapshotAt = useChatStore((state) => state.updateAgentStepSnapshotAt);
-  const clearAgentSteps = useChatStore((state) => state.clearAgentSteps);
+  const setAgentRunStartIndex = useChatStore((state) => state.setAgentRunStartIndex);
+  const associateAgentStepsWithMessage = useChatStore((state) => state.associateAgentStepsWithMessage);
   const clearFiles = useChatStore((state) => state.clearFiles);
   const loadComputerStateFromStorage = useChatStore((state) => state.loadComputerStateFromStorage);
 
@@ -174,9 +215,10 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
     switch (event.type) {
       case 'message.start':
         startStreaming(sessionId);
+        setAgentRunStartIndex(sessionId);
         clearReasoningSteps(sessionId);
         clearBrowserSession(sessionId);
-        clearAgentSteps(sessionId);
+        pipelineStageStepIndexRef.current.clear();
         break;
 
       case 'message.delta':
@@ -188,6 +230,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       case 'message.complete':
         if (event.data?.assistantMessageId) {
           associateToolCallsWithMessage(sessionId, event.data.assistantMessageId);
+          associateAgentStepsWithMessage(sessionId, event.data.assistantMessageId);
         }
         stopStreaming();
         // Refetch messages to ensure we have the latest
@@ -234,11 +277,38 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
             openComputerInspector();
             appendWebSearchResultSteps(event.data);
           }
+          if (event.data.toolName === 'ppt_generator') {
+            const previews = Array.isArray(event.data.previewSnapshots)
+              ? (event.data.previewSnapshots as unknown[]).filter(
+                  (item): item is string => typeof item === 'string' && item.startsWith('data:image/')
+                )
+              : [];
+
+            if (previews.length > 0) {
+              const lastPreview = previews[previews.length - 1];
+              const stageCount = PPT_PIPELINE_STAGE_ORDER.length;
+              for (let i = 0; i < stageCount; i++) {
+                const stageId = PPT_PIPELINE_STAGE_ORDER[i];
+                const stepIndex = pipelineStageStepIndexRef.current.get(stageId);
+                if (typeof stepIndex !== 'number') continue;
+                const previewIndex =
+                  previews.length === 1
+                    ? 0
+                    : Math.round((i * (previews.length - 1)) / (stageCount - 1));
+                const screenshot = previews[previewIndex] || lastPreview;
+                if (!screenshot) continue;
+                updateAgentStepSnapshotAt(sessionId, stepIndex, { screenshot });
+              }
+            }
+          }
           const toolResult: import('@mark/shared').ToolResult = {
             success: true,
             output: event.data.result || '',
             duration: event.data.duration || 0,
             artifacts: event.data.artifacts,
+            previewSnapshots: Array.isArray(event.data.previewSnapshots)
+              ? event.data.previewSnapshots
+              : undefined,
           };
           completeToolCall(event.data.toolCallId, toolResult);
           completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
@@ -336,6 +406,56 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       case 'ppt.pipeline.step':
         if (event.data?.step && event.data?.status) {
           updatePptStep(sessionId, event.data.step, event.data.status);
+          const stepKey = String(event.data.step);
+          const label = String(event.data.label || event.data.step);
+          const status = event.data.status as 'pending' | 'running' | 'completed';
+
+          if (status === 'running' && !pipelineStageStepIndexRef.current.has(stepKey)) {
+            const nextStepIndex =
+              useChatStore.getState().agentSteps.get(sessionId)?.steps.length ?? 0;
+            pipelineStageStepIndexRef.current.set(stepKey, nextStepIndex);
+            appendAgentStep(sessionId, {
+              type: 'tool',
+              output: `${label} started`,
+              snapshot: {
+                stepIndex: 0,
+                timestamp: Date.now(),
+                screenshot: buildPipelineStageSnapshot(label, 'running'),
+                metadata: {
+                  actionDescription: `PPT stage: ${label} (running)`,
+                },
+              },
+            });
+          }
+
+          if (status === 'completed') {
+            const stageStepIndex = pipelineStageStepIndexRef.current.get(stepKey);
+            if (typeof stageStepIndex === 'number') {
+              updateAgentStepAt(sessionId, stageStepIndex, {
+                output: `${label} completed`,
+              });
+              updateAgentStepSnapshotAt(sessionId, stageStepIndex, {
+                timestamp: Date.now(),
+                screenshot: buildPipelineStageSnapshot(label, 'completed'),
+                metadata: {
+                  actionDescription: `PPT stage: ${label} (completed)`,
+                },
+              });
+            } else {
+              appendAgentStep(sessionId, {
+                type: 'tool',
+                output: `${label} completed`,
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now(),
+                  screenshot: buildPipelineStageSnapshot(label, 'completed'),
+                  metadata: {
+                    actionDescription: `PPT stage: ${label} (completed)`,
+                  },
+                },
+              });
+            }
+          }
         }
         break;
 
@@ -375,14 +495,13 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
           const dataUrl = `data:image/jpeg;base64,${event.data.screenshot}`;
           setVisitScreenshot(sessionId, event.data.visitIndex, dataUrl);
           const timeline = useChatStore.getState().agentSteps.get(sessionId);
+          const runStartIndex = useChatStore.getState().agentRunStartIndex.get(sessionId);
           if (timeline?.steps?.length) {
-            const visitSteps = timeline.steps.filter(
-              (step) =>
-                step.type === 'browse' &&
-                (step.snapshot?.metadata?.actionDescription === 'Visit page' ||
-                  step.snapshot?.metadata?.actionDescription === 'Read page')
+            const visitStep = getVisitStepByIndex(
+              timeline.steps,
+              event.data.visitIndex,
+              runStartIndex
             );
-            const visitStep = visitSteps[event.data.visitIndex];
             if (visitStep) {
               updateAgentStepSnapshotAt(sessionId, visitStep.stepIndex, {
                 screenshot: dataUrl,
@@ -450,6 +569,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
           const actionIndex =
             typeof event.data.actionIndex === 'number' ? event.data.actionIndex : undefined;
           const dataUrl = `data:image/jpeg;base64,${event.data.screenshot}`;
+          const runStartIndex = useChatStore.getState().agentRunStartIndex.get(sessionId);
           setBrowserActionScreenshot(
             sessionId,
             dataUrl,
@@ -458,12 +578,11 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
           if (typeof actionIndex === 'number') {
             const timeline = useChatStore.getState().agentSteps.get(sessionId);
             if (timeline?.steps?.length) {
-              const browserSteps = timeline.steps.filter(
-                (step) =>
-                  step.type === 'browse' &&
-                  step.snapshot?.metadata?.actionDescription?.startsWith('Browser action:')
+              const target = getBrowserActionStepByIndex(
+                timeline.steps,
+                actionIndex,
+                runStartIndex
               );
-              const target = browserSteps[actionIndex];
               if (target) {
                 updateAgentStepSnapshotAt(sessionId, target.stepIndex, { screenshot: dataUrl });
               }
@@ -471,9 +590,16 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
           } else {
             const timeline = useChatStore.getState().agentSteps.get(sessionId);
             if (timeline && timeline.steps.length > 0) {
-              updateAgentStepSnapshotAt(sessionId, timeline.steps.length - 1, {
-                screenshot: dataUrl,
-              });
+              const target = getBrowserActionStepByIndex(
+                timeline.steps,
+                undefined,
+                runStartIndex
+              );
+              if (target) {
+                updateAgentStepSnapshotAt(sessionId, target.stepIndex, {
+                  screenshot: dataUrl,
+                });
+              }
             }
           }
         }

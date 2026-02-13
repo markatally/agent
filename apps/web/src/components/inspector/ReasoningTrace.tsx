@@ -366,6 +366,34 @@ function mergeAdjacentTimelineSteps(steps: TimelineStep[]): TimelineStep[] {
   return merged;
 }
 
+function getTimelineToolSignature(step: TimelineStep): string | null {
+  if (step.type !== 'tool') return null;
+  const signatures = step.toolCalls
+    .map((toolCall) => getToolCallSignature(toolCall))
+    .filter(Boolean)
+    .sort();
+  if (signatures.length === 0) return null;
+  return signatures.join('||');
+}
+
+function dedupeTimelineToolSteps(steps: TimelineStep[]): TimelineStep[] {
+  const seenSignatures = new Set<string>();
+  const deduped: TimelineStep[] = [];
+
+  for (const step of steps) {
+    const signature = getTimelineToolSignature(step);
+    if (!signature) {
+      deduped.push(step);
+      continue;
+    }
+    if (seenSignatures.has(signature)) continue;
+    seenSignatures.add(signature);
+    deduped.push(step);
+  }
+
+  return deduped;
+}
+
 function getStepDuration(step: TimelineStep, nowMs: number): string | null {
   if (step.status === 'running') {
     if (typeof step.startedAt === 'number') {
@@ -635,7 +663,7 @@ export function ReasoningTrace({ sessionId, selectedMessageId }: ReasoningTraceP
       rawSteps.push(createToolTimelineStep(undefined, [toolCall], `orphan-tool-${toolCall.toolCallId}`));
     }
 
-    return mergeAdjacentTimelineSteps(rawSteps);
+    return dedupeTimelineToolSteps(mergeAdjacentTimelineSteps(rawSteps));
   }, [reasoningSteps, toolCalls]);
 
   const hasRunningEntries = timelineSteps.some((step) => step.status === 'running');
@@ -737,6 +765,7 @@ export function ReasoningTrace({ sessionId, selectedMessageId }: ReasoningTraceP
                 : '';
             const isToolStep = step.type === 'tool';
             const isToolExpanded = Boolean(expandedToolSteps[step.id]);
+            const stepTitle = `Step ${index + 1}: ${step.title}`;
 
             return (
               <li key={step.id} className="relative pl-7">
@@ -746,50 +775,54 @@ export function ReasoningTrace({ sessionId, selectedMessageId }: ReasoningTraceP
 
                 <div className="space-y-2">
                   {isToolStep ? (
-                    <button
-                      type="button"
-                      className="w-full text-left"
-                      onClick={() =>
-                        setExpandedToolSteps((prev) => ({
-                          ...prev,
-                          [step.id]: !prev[step.id],
-                        }))
-                      }
-                      aria-expanded={isToolExpanded}
-                      aria-controls={`${step.id}-tool-content`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex min-w-0 items-start gap-1.5">
-                          <ChevronDown
-                            className={cn(
-                              'mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform',
-                              isToolExpanded && 'rotate-180'
-                            )}
-                          />
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-foreground">Step {index + 1}: {step.title}</div>
-                            {step.message ? (
-                              <div className="text-xs text-muted-foreground">{step.message}</div>
-                            ) : null}
-                            {toolNameLabel ? (
-                              <div className="text-xs text-muted-foreground">Tool: {toolNameLabel}</div>
-                            ) : null}
-                          </div>
-                        </div>
-                        <div className="w-14 shrink-0 text-right">
-                          {duration ? <div className="text-[11px] text-muted-foreground">{duration}</div> : null}
-                        </div>
+                    <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-3">
+                      <button
+                        type="button"
+                        className="min-w-0 text-left"
+                        onClick={() =>
+                          setExpandedToolSteps((prev) => ({
+                            ...prev,
+                            [step.id]: !prev[step.id],
+                          }))
+                        }
+                        aria-expanded={isToolExpanded}
+                        aria-controls={`${step.id}-tool-content`}
+                      >
+                        <div className="text-sm font-semibold text-foreground">{stepTitle}</div>
+                        {step.message ? (
+                          <div className="text-xs text-muted-foreground">{step.message}</div>
+                        ) : null}
+                        {toolNameLabel ? (
+                          <div className="text-xs text-muted-foreground">Tool: {toolNameLabel}</div>
+                        ) : null}
+                      </button>
+                      <div className="w-20 shrink-0 text-right">
+                        {duration ? <div className="text-[11px] text-muted-foreground">{duration}</div> : null}
+                        <button
+                          type="button"
+                          className="mt-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                          onClick={() =>
+                            setExpandedToolSteps((prev) => ({
+                              ...prev,
+                              [step.id]: !prev[step.id],
+                            }))
+                          }
+                          aria-expanded={isToolExpanded}
+                          aria-controls={`${step.id}-tool-content`}
+                        >
+                          {isToolExpanded ? 'Hide' : 'Details'}
+                        </button>
                       </div>
-                    </button>
+                    </div>
                   ) : (
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-foreground">Step {index + 1}: {step.title}</div>
+                        <div className="text-sm font-semibold text-foreground">{stepTitle}</div>
                         {step.message ? (
                           <div className="text-xs text-muted-foreground">{step.message}</div>
                         ) : null}
                       </div>
-                      <div className="w-14 shrink-0 text-right">
+                      <div className="w-20 shrink-0 text-right">
                         {duration ? <div className="text-[11px] text-muted-foreground">{duration}</div> : null}
                       </div>
                     </div>

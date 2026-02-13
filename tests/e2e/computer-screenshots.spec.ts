@@ -7,6 +7,8 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 async function login(page: Page) {
   await page.request.post('/api/auth/register', {
@@ -33,6 +35,7 @@ async function openInspector(page: Page) {
 }
 
 test.describe('Inspector computer viewport and step screenshots', () => {
+  test.describe.configure({ mode: 'serial' });
   test('inspector shows viewport area (placeholder or screenshot or Sandbox)', async ({
     page,
   }) => {
@@ -73,12 +76,11 @@ test.describe('Inspector computer viewport and step screenshots', () => {
     await openInspector(page);
 
     const placeholder = page.locator('[data-testid="computer-viewport-placeholder"]');
-    await expect(placeholder).toBeVisible({ timeout: 15000 });
-    await expect(placeholder.getByText(/No visual steps yet|Snapshot unavailable for this step/i)).toBeVisible();
-
     const screenshotImg = page.locator('[data-testid="browser-viewport-screenshot"]');
     const browserOff = page.getByText('Browser view is off');
-    const snapshotUnavailable = placeholder.getByText(/Snapshot unavailable for this step/i);
+    await expect(placeholder.or(screenshotImg).or(browserOff)).toBeVisible({ timeout: 20000 });
+
+    const snapshotUnavailable = page.getByText(/Snapshot unavailable for this step/i);
     const noVisualSteps = page.getByText(/No visual steps yet/i);
     await expect
       .poll(
@@ -92,5 +94,76 @@ test.describe('Inspector computer viewport and step screenshots', () => {
         { timeout: 90000 }
       )
       .toBe(true);
+  });
+
+  test('complex PPT prompt validates computer, reasoning, reply, and download artifact', async ({
+    page,
+  }) => {
+    test.setTimeout(480000);
+    test.skip(!!process.env.CI, 'skip in CI');
+    await login(page);
+
+    const newChatBtn = page.locator('[data-testid="new-chat-button"]');
+    await newChatBtn.click();
+    await page.waitForURL(/\/chat\/[^/]+/, { timeout: 15000 });
+
+    const chatInput = page.locator('[data-testid="chat-input"]');
+    await expect(chatInput).toBeVisible({ timeout: 10000 });
+
+    const complexPrompt =
+      'Make a PPT based on top 5 TimeSeries Forecasting ML academic / research papers.';
+    await chatInput.fill(complexPrompt);
+    await chatInput.press('Enter');
+
+    await openInspector(page);
+
+    const placeholder = page.locator('[data-testid="computer-viewport-placeholder"]');
+    const screenshotImg = page.locator('[data-testid="browser-viewport-screenshot"]');
+    const browserOff = page.getByText('Browser view is off');
+    await expect(placeholder.or(screenshotImg).or(browserOff)).toBeVisible({ timeout: 20000 });
+
+    const reasoningTimeline = page.locator('[data-testid="reasoning-trace-timeline"]');
+    const noReasoningText = page.getByText(/No reasoning trace yet/i);
+    await expect(reasoningTimeline.or(noReasoningText)).toBeVisible({ timeout: 90000 });
+
+    const assistantMessages = page.locator('[data-testid="assistant-message"]');
+    const stopBtn = page.getByRole('button', { name: /stop response/i });
+    await expect(assistantMessages.last().or(stopBtn)).toBeVisible({ timeout: 180000 });
+
+    const sendBtn = page.getByRole('button', { name: /send message/i });
+    await expect(sendBtn).toBeVisible({ timeout: 360000 });
+    await expect(assistantMessages.last()).toBeVisible({ timeout: 120000 });
+    await expect
+      .poll(
+        async () => ((await assistantMessages.last().textContent()) || '').trim().length,
+        { timeout: 180000 }
+      )
+      .toBeGreaterThan(40);
+
+    await expect
+      .poll(
+        async () => {
+          const replyText = ((await assistantMessages.last().textContent()) || '').toLowerCase();
+          const hasDownload = await page.getByRole('button', { name: /^download$/i }).count();
+          const hasPptMention = replyText.includes('.pptx') || replyText.includes('presentation');
+          return hasDownload > 0 || hasPptMention;
+        },
+        { timeout: 180000 }
+      )
+      .toBe(true);
+
+    const downloadBtn = page.getByRole('button', { name: /^download$/i }).first();
+    await expect(downloadBtn).toBeVisible({ timeout: 180000 });
+
+    const downloadPromise = page.waitForEvent('download', { timeout: 120000 });
+    await downloadBtn.click();
+    const download = await downloadPromise;
+    const suggestedFilename = download.suggestedFilename();
+    expect(suggestedFilename.toLowerCase()).toContain('.pptx');
+
+    const downloadDir = '/tmp/markagent-e2e-downloads';
+    mkdirSync(downloadDir, { recursive: true });
+    const savedPath = join(downloadDir, suggestedFilename);
+    await download.saveAs(savedPath);
   });
 });

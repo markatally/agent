@@ -13,6 +13,8 @@ type PersistedToolCall = {
     artifacts?: Array<{ name?: string; content?: unknown }>;
   };
   createdAt?: string | number | Date;
+  messageId?: string;
+  message_id?: string;
 };
 
 function normalizeUrl(raw: string): string {
@@ -70,8 +72,10 @@ export function reconstructAgentStepsFromToolCalls(toolCalls: PersistedToolCall[
 
     if (toolName === 'web_search') {
       const query = params?.query || params?.q || 'Web search';
+      const messageId = toolCall?.messageId || toolCall?.message_id;
       reconstructedSteps.push({
         stepIndex,
+        messageId: typeof messageId === 'string' ? messageId : undefined,
         type: 'search',
         output: String(query),
         snapshot: {
@@ -113,8 +117,10 @@ export function reconstructAgentStepsFromToolCalls(toolCalls: PersistedToolCall[
         const match = parsedResults.find((r) => normalizeUrl(String(r?.url ?? '')) === url);
         const title = match?.title || url;
         const summary = match?.content;
+        const messageId = toolCall?.messageId || toolCall?.message_id;
         reconstructedSteps.push({
           stepIndex,
+          messageId: typeof messageId === 'string' ? messageId : undefined,
           type: 'browse',
           output: title,
           snapshot: {

@@ -1,5 +1,4 @@
 import { useParams } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
 import { useSessions } from '../../hooks/useSessions';
 import { SessionItem } from './SessionItem';
 import { ScrollArea } from '../ui/scroll-area';

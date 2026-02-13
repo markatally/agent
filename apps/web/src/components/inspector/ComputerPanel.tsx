@@ -63,18 +63,40 @@ const parseAnsiSegments = (input: string): Array<{ text: string; className?: str
 };
 
 const getNearestTimelineScreenshot = (
-  steps: Array<{ snapshot?: { screenshot?: string | null } }>,
+  steps: Array<{ snapshot?: { screenshot?: string | null; url?: string } }>,
   currentIndex: number
 ): string | null => {
   if (!steps.length || currentIndex < 0 || currentIndex >= steps.length) return null;
-  const current = steps[currentIndex]?.snapshot?.screenshot;
-  if (current) return current;
+  const current = steps[currentIndex]?.snapshot;
+  if (current?.screenshot) return current.screenshot;
+  const currentUrl = current?.url ? normalizeUrl(current.url) : null;
+  if (!currentUrl) {
+    for (let offset = 1; offset < steps.length; offset++) {
+      const prevSnapshot = steps[currentIndex - offset]?.snapshot;
+      if (prevSnapshot?.screenshot) return prevSnapshot.screenshot;
+      const nextSnapshot = steps[currentIndex + offset]?.snapshot;
+      if (nextSnapshot?.screenshot) return nextSnapshot.screenshot;
+    }
+    return null;
+  }
 
   for (let offset = 1; offset < steps.length; offset++) {
-    const prev = steps[currentIndex - offset]?.snapshot?.screenshot;
-    if (prev) return prev;
-    const next = steps[currentIndex + offset]?.snapshot?.screenshot;
-    if (next) return next;
+    const prevSnapshot = steps[currentIndex - offset]?.snapshot;
+    if (
+      prevSnapshot?.screenshot &&
+      prevSnapshot.url &&
+      normalizeUrl(prevSnapshot.url) === currentUrl
+    ) {
+      return prevSnapshot.screenshot;
+    }
+    const nextSnapshot = steps[currentIndex + offset]?.snapshot;
+    if (
+      nextSnapshot?.screenshot &&
+      nextSnapshot.url &&
+      normalizeUrl(nextSnapshot.url) === currentUrl
+    ) {
+      return nextSnapshot.screenshot;
+    }
   }
   return null;
 };
@@ -85,6 +107,35 @@ const getLatestBrowserActionScreenshot = (
   for (let i = actions.length - 1; i >= 0; i--) {
     const shot = actions[i]?.screenshotDataUrl;
     if (shot) return shot;
+  }
+  return null;
+};
+
+function normalizeComparableUrl(raw: string): string {
+  try {
+    const parsed = new URL(normalizeUrl(raw));
+    parsed.hash = '';
+    let pathname = parsed.pathname || '/';
+    if (pathname.length > 1 && pathname.endsWith('/')) {
+      pathname = pathname.slice(0, -1);
+    }
+    return `${parsed.origin}${pathname}${parsed.search}`;
+  } catch {
+    return raw;
+  }
+}
+
+const getUrlMatchedScreenshot = (
+  entries: Array<{ url?: string; screenshotDataUrl?: string | null }>,
+  targetUrl?: string | null
+): string | null => {
+  if (!targetUrl) return null;
+  const target = normalizeComparableUrl(targetUrl);
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const candidateUrl = entries[i]?.url;
+    const screenshot = entries[i]?.screenshotDataUrl;
+    if (!candidateUrl || !screenshot) continue;
+    if (normalizeComparableUrl(candidateUrl) === target) return screenshot;
   }
   return null;
 };
@@ -118,6 +169,8 @@ function normalizeUrl(raw: string): string {
 }
 
 export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps) {
+  const selectedMessageId = useChatStore((state) => state.selectedMessageId);
+  const messages = useChatStore((state) => state.messages.get(sessionId) || []);
   const isStreaming = useChatStore((state) => state.isStreaming);
   const streamingSessionId = useChatStore((state) => state.streamingSessionId);
   const terminalLines = useChatStore((state) => state.terminalLines.get(sessionId) || []);
@@ -130,6 +183,7 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
   const browserSession = useChatStore((state) => state.browserSession.get(sessionId));
   const setBrowserActionIndex = useChatStore((state) => state.setBrowserActionIndex);
   const agentTimeline = useChatStore((state) => state.agentSteps.get(sessionId));
+  const agentRunStartIndex = useChatStore((state) => state.agentRunStartIndex.get(sessionId));
   const setAgentStepIndex = useChatStore((state) => state.setAgentStepIndex);
   const isSessionStreaming = isStreaming && streamingSessionId === sessionId;
 
@@ -194,11 +248,6 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
   const lastActivity = browseActivity[browseActivity.length - 1];
   const browseResults = browseActivity.filter((activity) => activity.action === 'visit');
   const searchQueries = browseActivity.filter((activity) => activity.action === 'search');
-  const pptFiles = fileArtifacts.filter(
-    (artifact) =>
-      artifact.name?.toLowerCase().endsWith('.pptx') ||
-      artifact.mimeType?.includes('presentation')
-  );
 
   const isBrowserMode = browserSession?.active ?? false;
   const browserActions = browserSession?.actions ?? [];
@@ -212,11 +261,56 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
   const actionLabel = lastBrowserAction
     ? getBrowserActionLabel(`browser_${lastBrowserAction.type}`)
     : 'Browsing';
-  const agentSteps = agentTimeline?.steps ?? [];
-  const agentCurrentIndex = Math.max(
-    0,
-    Math.min(agentTimeline?.currentStepIndex ?? Math.max(0, agentSteps.length - 1), Math.max(0, agentSteps.length - 1))
+
+  const latestAssistantMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (message.role === 'assistant') return message.id;
+    }
+    return null;
+  }, [messages]);
+
+  const scopeMessageId = selectedMessageId ?? (isSessionStreaming ? null : latestAssistantMessageId);
+  const allAgentSteps = agentTimeline?.steps ?? [];
+  const scopedAgentSteps = useMemo(() => {
+    if (scopeMessageId) {
+      const explicit = allAgentSteps.filter((step) => step.messageId === scopeMessageId);
+      if (explicit.length > 0) return explicit;
+    }
+    if (isSessionStreaming) {
+      if (
+        typeof agentRunStartIndex === 'number' &&
+        Number.isInteger(agentRunStartIndex) &&
+        agentRunStartIndex >= 0 &&
+        agentRunStartIndex <= allAgentSteps.length
+      ) {
+        return allAgentSteps.slice(agentRunStartIndex);
+      }
+      const inFlight = allAgentSteps.filter((step) => !step.messageId);
+      if (inFlight.length > 0) return inFlight;
+    }
+    return allAgentSteps;
+  }, [allAgentSteps, scopeMessageId, isSessionStreaming, agentRunStartIndex]);
+  const scopedIndices = useMemo(
+    () => scopedAgentSteps.map((step) => allAgentSteps.indexOf(step)),
+    [allAgentSteps, scopedAgentSteps]
   );
+  const fallbackScopedIndex = Math.max(0, scopedAgentSteps.length - 1);
+  const currentAbsoluteIndex = Math.max(
+    0,
+    Math.min(
+      agentTimeline?.currentStepIndex ?? Math.max(0, allAgentSteps.length - 1),
+      Math.max(0, allAgentSteps.length - 1)
+    )
+  );
+  const matchedScopedIndex = scopedIndices.findIndex((absoluteIndex) => absoluteIndex === currentAbsoluteIndex);
+  const agentCurrentIndex = matchedScopedIndex >= 0 ? matchedScopedIndex : fallbackScopedIndex;
+  const resolveAbsoluteIndex = (scopedIndex: number) => {
+    const absolute = scopedIndices[scopedIndex];
+    if (typeof absolute === 'number' && absolute >= 0) return absolute;
+    return currentAbsoluteIndex;
+  };
+  const agentSteps = scopedAgentSteps;
   const selectedAgentStep = agentSteps[agentCurrentIndex];
   const selectedSnapshotUrl = selectedAgentStep?.snapshot?.screenshot ?? null;
   const selectedStepUrlRaw = selectedAgentStep?.snapshot?.url ?? displayUrl;
@@ -236,17 +330,21 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
   const timelineControlsClass = compact
     ? 'rounded-lg border border-border/60 bg-muted/20 px-2 py-1.5'
     : undefined;
+  const viewportFrameClass = 'h-[clamp(300px,46vh,300px)] w-full';
 
   if (hasReplayTimeline && !(isPptTask && pptPipeline)) {
     const replayIndex = hasAgentTimeline ? agentCurrentIndex : browserCurrentIndex;
     const replayTotal = hasAgentTimeline ? agentSteps.length : browserActions.length;
     const replayLive =
       isSessionStreaming && isBrowserMode && (hasAgentTimeline ? isAtLatestAgentStep : isAtLatestAction);
+    const replayUrl = hasAgentTimeline ? selectedStepUrl : displayUrl;
     const replaySnapshot = hasAgentTimeline
       ? selectedSnapshotUrl ??
         getNearestTimelineScreenshot(agentSteps, agentCurrentIndex) ??
-        getLatestBrowserActionScreenshot(browserActions)
+        getUrlMatchedScreenshot(browserActions, replayUrl) ??
+        getUrlMatchedScreenshot(browseResults, replayUrl)
       : browserActions[browserCurrentIndex]?.screenshotDataUrl ??
+        getUrlMatchedScreenshot(browserActions, replayUrl) ??
         getLatestBrowserActionScreenshot(browserActions);
     const shouldRenderReplayViewport = replayLive || Boolean(replaySnapshot);
     return (
@@ -263,20 +361,24 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
               showLiveIndicator={false}
             />
             {shouldRenderReplayViewport ? (
-              <BrowserViewport
-                sessionId={sessionId}
-                enabled={isBrowserMode && replayLive}
-                snapshotUrl={replaySnapshot}
-                showLive={replayLive}
-                fillHeight
-                minHeight={0}
-                className="flex-1 min-h-0"
-              />
+              <div className={viewportFrameClass}>
+                <BrowserViewport
+                  sessionId={sessionId}
+                  enabled={isBrowserMode && replayLive}
+                  snapshotUrl={replaySnapshot}
+                  showLive={replayLive}
+                  fillHeight
+                  minHeight={300}
+                  className="h-full min-h-full"
+                />
+              </div>
             ) : (
               <div
                 data-testid="computer-viewport-placeholder"
-                className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
-                style={{ aspectRatio: 16 / 9 }}
+                className={cn(
+                  'flex items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground',
+                  viewportFrameClass
+                )}
               >
                 Snapshot unavailable for this step. Agent execution continued without blocking.
               </div>
@@ -287,22 +389,31 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
               isLive={replayLive}
               onPrevious={() =>
                 hasAgentTimeline
-                  ? setAgentStepIndex(sessionId, replayIndex - 1)
+                  ? setAgentStepIndex(
+                      sessionId,
+                      resolveAbsoluteIndex(Math.max(0, replayIndex - 1))
+                    )
                   : setBrowserActionIndex(sessionId, replayIndex - 1)
               }
               onNext={() =>
                 hasAgentTimeline
-                  ? setAgentStepIndex(sessionId, replayIndex + 1)
+                  ? setAgentStepIndex(
+                      sessionId,
+                      resolveAbsoluteIndex(Math.min(replayTotal - 1, replayIndex + 1))
+                    )
                   : setBrowserActionIndex(sessionId, replayIndex + 1)
               }
               onJumpToLive={() =>
                 hasAgentTimeline
-                  ? setAgentStepIndex(sessionId, Math.max(0, replayTotal - 1))
+                  ? setAgentStepIndex(
+                      sessionId,
+                      resolveAbsoluteIndex(Math.max(0, replayTotal - 1))
+                    )
                   : setBrowserActionIndex(sessionId, Math.max(0, replayTotal - 1))
               }
               onSeek={(index) =>
                 hasAgentTimeline
-                  ? setAgentStepIndex(sessionId, index)
+                  ? setAgentStepIndex(sessionId, resolveAbsoluteIndex(index))
                   : setBrowserActionIndex(sessionId, index)
               }
               showLiveIndicator={false}
@@ -355,9 +466,8 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
               const viewportSnapshot = hasTimeline
                 ? selectedSnapshotUrl ??
                   getNearestTimelineScreenshot(agentSteps, agentCurrentIndex) ??
-                  (browserActions[browserCurrentIndex]?.screenshotDataUrl ??
-                    getLatestBrowserActionScreenshot(browserActions) ??
-                    null)
+                  getUrlMatchedScreenshot(browserActions, viewportUrl) ??
+                  getUrlMatchedScreenshot(browseResults, viewportUrl)
                 : browserActions[browserCurrentIndex]?.screenshotDataUrl ?? null;
               const timelineIndex = hasTimeline ? agentCurrentIndex : browserCurrentIndex;
               const timelineTotal = hasTimeline ? agentSteps.length : browserActions.length;
@@ -381,20 +491,24 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
                   {hasBrowser ? (
                     <>
                       {shouldRenderTimelineViewport ? (
-                        <BrowserViewport
-                          sessionId={sessionId}
-                          enabled={isBrowserMode && timelineIsLive}
-                          snapshotUrl={viewportSnapshot}
-                          showLive={isLive && timelineIsLive}
-                          fillHeight
-                          minHeight={0}
-                          className="flex-1 min-h-0"
-                        />
+                        <div className={viewportFrameClass}>
+                          <BrowserViewport
+                            sessionId={sessionId}
+                            enabled={isBrowserMode && timelineIsLive}
+                            snapshotUrl={viewportSnapshot}
+                            showLive={isLive && timelineIsLive}
+                            fillHeight
+                            minHeight={300}
+                            className="h-full min-h-full"
+                          />
+                        </div>
                       ) : (
                         <div
                           data-testid="computer-viewport-placeholder"
-                          className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
-                          style={{ aspectRatio: 16 / 9 }}
+                          className={cn(
+                            'flex items-center justify-center rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs text-muted-foreground',
+                            viewportFrameClass
+                          )}
                         >
                           Snapshot unavailable for this step. Agent execution continued without blocking.
                         </div>
@@ -406,22 +520,31 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
                           isLive={timelineIsLive}
                           onPrevious={() =>
                             hasTimeline
-                              ? setAgentStepIndex(sessionId, timelineIndex - 1)
+                              ? setAgentStepIndex(
+                                  sessionId,
+                                  resolveAbsoluteIndex(Math.max(0, timelineIndex - 1))
+                                )
                               : setBrowserActionIndex(sessionId, timelineIndex - 1)
                           }
                           onNext={() =>
                             hasTimeline
-                              ? setAgentStepIndex(sessionId, timelineIndex + 1)
+                              ? setAgentStepIndex(
+                                  sessionId,
+                                  resolveAbsoluteIndex(Math.min(timelineTotal - 1, timelineIndex + 1))
+                                )
                               : setBrowserActionIndex(sessionId, timelineIndex + 1)
                           }
                           onJumpToLive={() =>
                             hasTimeline
-                              ? setAgentStepIndex(sessionId, Math.max(0, timelineTotal - 1))
+                              ? setAgentStepIndex(
+                                  sessionId,
+                                  resolveAbsoluteIndex(Math.max(0, timelineTotal - 1))
+                                )
                               : setBrowserActionIndex(sessionId, Math.max(0, timelineTotal - 1))
                           }
                           onSeek={(index) =>
                             hasTimeline
-                              ? setAgentStepIndex(sessionId, index)
+                              ? setAgentStepIndex(sessionId, resolveAbsoluteIndex(index))
                               : setBrowserActionIndex(sessionId, index)
                           }
                           showLiveIndicator={false}
@@ -434,20 +557,24 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
                   ) : browseResults.length > 0 ? (
                     <>
                       {visitScreenshotUrl ? (
-                        <BrowserViewport
-                          sessionId={sessionId}
-                          enabled={false}
-                          snapshotUrl={visitScreenshotUrl}
-                          showLive={false}
-                          fillHeight
-                          minHeight={0}
-                          className="flex-1 min-h-0"
-                        />
+                        <div className={viewportFrameClass}>
+                          <BrowserViewport
+                            sessionId={sessionId}
+                            enabled={false}
+                            snapshotUrl={visitScreenshotUrl}
+                            showLive={false}
+                            fillHeight
+                            minHeight={300}
+                            className="h-full min-h-full"
+                          />
+                        </div>
                       ) : (
                         <div
                           data-testid="computer-viewport-placeholder"
-                          className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center"
-                          style={{ aspectRatio: 16 / 9 }}
+                          className={cn(
+                            'flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center',
+                            viewportFrameClass
+                          )}
                         >
                           {visitViewportUrl ? (
                             <>
@@ -528,8 +655,10 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
                   ) : (
                     <div
                       data-testid="computer-viewport-placeholder"
-                      className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center"
-                      style={{ aspectRatio: 16 / 9 }}
+                      className={cn(
+                        'flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center',
+                        viewportFrameClass
+                      )}
                     >
                       <p className="text-sm font-medium text-muted-foreground">
                         No visual steps yet
@@ -581,13 +710,18 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
         <section className={cn(compact ? 'rounded-md' : 'rounded-xl border bg-muted/10')}>
           <div className={cn('space-y-2', compact ? 'px-1 py-1' : 'px-4 pb-4 pt-3')}>
             <div
-              data-testid="computer-empty-state"
-              className="rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center"
+              data-testid="computer-viewport-placeholder"
+              className="rounded-lg border border-dashed bg-muted/20 px-4 py-8"
             >
-              <p className="text-sm font-medium text-muted-foreground">No computer activity yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Computer playback appears only after browser or tool execution starts.
-              </p>
+              <div
+                data-testid="computer-empty-state"
+                className="text-center"
+              >
+                <p className="text-sm font-medium text-muted-foreground">No computer activity yet</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Computer playback appears only after browser or tool execution starts.
+                </p>
+              </div>
             </div>
           </div>
         </section>

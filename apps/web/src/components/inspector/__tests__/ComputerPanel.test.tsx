@@ -25,6 +25,7 @@ describe('ComputerPanel', () => {
       files: new Map(),
       browserSession: new Map(),
       agentSteps: new Map(),
+      agentRunStartIndex: new Map(),
     });
   });
 
@@ -79,5 +80,377 @@ describe('ComputerPanel', () => {
 
     expect(screen.getByText(/Snapshot unavailable for this step/i)).toBeInTheDocument();
     expect(screen.queryByText('Browser view is off')).not.toBeInTheDocument();
+  });
+
+  it('renders selected historical task snapshot instead of latest run snapshot', () => {
+    const oldShot =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>old</text></svg>');
+    const newShot =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>new</text></svg>');
+
+    useChatStore.setState({
+      selectedMessageId: 'msg-old',
+      isStreaming: true,
+      streamingSessionId: 'session-history',
+      messages: new Map([
+        [
+          'session-history',
+          [
+            {
+              id: 'u1',
+              sessionId: 'session-history',
+              role: 'user',
+              content: 'first',
+              createdAt: new Date(),
+            },
+            {
+              id: 'msg-old',
+              sessionId: 'session-history',
+              role: 'assistant',
+              content: 'first reply',
+              createdAt: new Date(),
+            },
+            {
+              id: 'u2',
+              sessionId: 'session-history',
+              role: 'user',
+              content: 'second',
+              createdAt: new Date(),
+            },
+            {
+              id: 'msg-new',
+              sessionId: 'session-history',
+              role: 'assistant',
+              content: 'second reply',
+              createdAt: new Date(),
+            },
+          ],
+        ],
+      ]),
+      browserSession: new Map([
+        [
+          'session-history',
+          {
+            active: true,
+            currentUrl: 'https://new.example.com',
+            currentTitle: 'New',
+            status: 'active',
+            actions: [],
+            currentActionIndex: 0,
+          },
+        ],
+      ]),
+      agentSteps: new Map([
+        [
+          'session-history',
+          {
+            currentStepIndex: 1,
+            steps: [
+              {
+                stepIndex: 0,
+                messageId: 'msg-old',
+                type: 'browse',
+                output: 'Old run',
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now() - 1000,
+                  url: 'https://old.example.com',
+                  screenshot: oldShot,
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+              {
+                stepIndex: 1,
+                messageId: 'msg-new',
+                type: 'browse',
+                output: 'New run',
+                snapshot: {
+                  stepIndex: 1,
+                  timestamp: Date.now(),
+                  url: 'https://new.example.com',
+                  screenshot: newShot,
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    render(<ComputerPanel sessionId="session-history" compact />);
+
+    const viewport = screen.getByTestId('browser-viewport-screenshot');
+    expect(viewport).toHaveAttribute('src', oldShot);
+  });
+
+  it('does not reuse unrelated screenshot across different timeline URLs', () => {
+    const shot =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>only-one</text></svg>');
+
+    useChatStore.setState({
+      browserSession: new Map([
+        [
+          'session-history',
+          {
+            active: false,
+            currentUrl: 'https://new.example.com',
+            currentTitle: 'New',
+            status: 'closed',
+            actions: [
+              {
+                id: 'a1',
+                type: 'navigate',
+                url: 'https://new.example.com',
+                timestamp: Date.now(),
+                screenshotDataUrl: shot,
+              },
+            ],
+            currentActionIndex: 0,
+          },
+        ],
+      ]),
+      agentSteps: new Map([
+        [
+          'session-history',
+          {
+            currentStepIndex: 1,
+            steps: [
+              {
+                stepIndex: 0,
+                type: 'browse',
+                output: 'First',
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now() - 1000,
+                  url: 'https://first.example.com',
+                  screenshot: shot,
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+              {
+                stepIndex: 1,
+                type: 'browse',
+                output: 'Second',
+                snapshot: {
+                  stepIndex: 1,
+                  timestamp: Date.now(),
+                  url: 'https://second.example.com',
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    render(<ComputerPanel sessionId="session-history" compact />);
+
+    expect(screen.getByText(/Snapshot unavailable for this step/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('browser-viewport-screenshot')).not.toBeInTheDocument();
+  });
+
+  it('uses url-matched browser action screenshot when timeline step screenshot is missing', () => {
+    const matchedShot =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>matched</text></svg>');
+
+    useChatStore.setState({
+      browserSession: new Map([
+        [
+          'session-history',
+          {
+            active: false,
+            currentUrl: 'https://hitconsultant.net/category/health-it/page/857/',
+            currentTitle: 'Page 857',
+            status: 'closed',
+            actions: [
+              {
+                id: 'a1',
+                type: 'navigate',
+                url: 'https://hitconsultant.net/category/health-it/page/856/',
+                timestamp: Date.now() - 1000,
+              },
+              {
+                id: 'a2',
+                type: 'navigate',
+                url: 'https://hitconsultant.net/category/health-it/page/857',
+                timestamp: Date.now(),
+                screenshotDataUrl: matchedShot,
+              },
+            ],
+            currentActionIndex: 1,
+          },
+        ],
+      ]),
+      agentSteps: new Map([
+        [
+          'session-history',
+          {
+            currentStepIndex: 0,
+            steps: [
+              {
+                stepIndex: 0,
+                type: 'browse',
+                output: 'Visit page',
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now(),
+                  url: 'https://hitconsultant.net/category/health-it/page/857/',
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    render(<ComputerPanel sessionId="session-history" compact />);
+
+    expect(screen.queryByText(/Snapshot unavailable for this step/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('browser-viewport-screenshot')).toHaveAttribute('src', matchedShot);
+  });
+
+  it('starts live run timeline from step 1 using run start index', () => {
+    useChatStore.setState({
+      isStreaming: true,
+      streamingSessionId: 'session-live',
+      browserSession: new Map([
+        [
+          'session-live',
+          {
+            active: true,
+            currentUrl: 'https://new.example.com',
+            currentTitle: 'New',
+            status: 'active',
+            actions: [],
+            currentActionIndex: 0,
+          },
+        ],
+      ]),
+      agentRunStartIndex: new Map([['session-live', 3]]),
+      agentSteps: new Map([
+        [
+          'session-live',
+          {
+            currentStepIndex: 3,
+            steps: [
+              {
+                stepIndex: 0,
+                type: 'browse',
+                output: 'Old 1',
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now() - 3000,
+                  url: 'https://old-1.example.com',
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+              {
+                stepIndex: 1,
+                type: 'browse',
+                output: 'Old 2',
+                snapshot: {
+                  stepIndex: 1,
+                  timestamp: Date.now() - 2000,
+                  url: 'https://old-2.example.com',
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+              {
+                stepIndex: 2,
+                type: 'browse',
+                output: 'Old 3',
+                snapshot: {
+                  stepIndex: 2,
+                  timestamp: Date.now() - 1000,
+                  url: 'https://old-3.example.com',
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+              {
+                stepIndex: 3,
+                type: 'browse',
+                output: 'New 1',
+                snapshot: {
+                  stepIndex: 3,
+                  timestamp: Date.now(),
+                  url: 'https://new.example.com',
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    render(<ComputerPanel sessionId="session-live" compact />);
+
+    expect(screen.getByText('Step 1 of 1')).toBeInTheDocument();
+  });
+
+  it('reuses nearest snapshot for non-url final steps to avoid empty completed viewport', () => {
+    const shot =
+      'data:image/svg+xml;charset=utf-8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>visit</text></svg>');
+
+    useChatStore.setState({
+      browserSession: new Map([
+        [
+          'session-finished',
+          {
+            active: false,
+            currentUrl: 'https://example.com',
+            currentTitle: 'Example',
+            status: 'closed',
+            actions: [],
+            currentActionIndex: 0,
+          },
+        ],
+      ]),
+      agentSteps: new Map([
+        [
+          'session-finished',
+          {
+            currentStepIndex: 1,
+            steps: [
+              {
+                stepIndex: 0,
+                type: 'browse',
+                output: 'Visit page',
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now() - 1000,
+                  url: 'https://example.com',
+                  screenshot: shot,
+                  metadata: { actionDescription: 'Visit page' },
+                },
+              },
+              {
+                stepIndex: 1,
+                type: 'finalize',
+                output: 'Completed',
+                snapshot: {
+                  stepIndex: 1,
+                  timestamp: Date.now(),
+                  metadata: { actionDescription: 'Browser closed' },
+                },
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    render(<ComputerPanel sessionId="session-finished" compact />);
+
+    expect(screen.queryByText(/Snapshot unavailable for this step/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId('browser-viewport-screenshot')).toHaveAttribute('src', shot);
   });
 });

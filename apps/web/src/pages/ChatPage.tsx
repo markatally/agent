@@ -64,7 +64,7 @@ export function ChatPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen min-w-0 overflow-hidden">
       {/* Sidebar */}
       <Sidebar
         collapsed={!sidebarOpen}
@@ -72,9 +72,9 @@ export function ChatPage() {
         onOpenSkillsConfig={() => setSkillsModalOpen(true)}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-w-0 flex-[1_1_auto] overflow-hidden">
         {/* Main content area */}
-        <main className="relative flex flex-1 flex-col overflow-hidden">
+        <main className="relative flex min-w-0 flex-[1_1_auto] flex-col overflow-hidden">
           {!sidebarOpen ? (
             <Button
               variant="ghost"
@@ -103,7 +103,7 @@ export function ChatPage() {
           ) : (
             // No session selected
             <div className="flex flex-1 flex-col items-center justify-center px-6">
-              <div className="w-full max-w-3xl space-y-6 text-center">
+              <div className="w-full space-y-6 text-center">
                 <div className="space-y-3">
                   <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground" />
                   <h2 className="text-3xl font-semibold">What can I do for you?</h2>

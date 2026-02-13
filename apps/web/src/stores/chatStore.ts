@@ -287,6 +287,8 @@ interface ChatState {
   browserSession: Map<string, BrowserSessionState>;
   // Unified agent step timeline (Computer mode replay/inspection)
   agentSteps: Map<string, AgentStepTimelineState>;
+  // Start index of the current in-flight run within agentSteps[sessionId].steps
+  agentRunStartIndex: Map<string, number>;
 
   // Actions - Messages
   setMessages: (sessionId: string, messages: Message[]) => void;
@@ -371,6 +373,8 @@ interface ChatState {
     updates: Partial<NonNullable<AgentStep['snapshot']>>
   ) => void;
   setAgentStepIndex: (sessionId: string, index: number) => void;
+  setAgentRunStartIndex: (sessionId: string) => void;
+  associateAgentStepsWithMessage: (sessionId: string, messageId: string) => void;
   clearAgentSteps: (sessionId: string) => void;
   loadComputerStateFromStorage: (sessionId: string) => void;
 }
@@ -416,6 +420,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isPptTask: new Map(),
   browserSession: new Map(),
   agentSteps: new Map(),
+  agentRunStartIndex: new Map(),
 
   // Set messages for a session
   setMessages: (sessionId: string, messages: Message[]) => {
@@ -478,7 +483,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // Finalize streaming message
-  finalizeStreamingMessage: (messageId: string, message: Message) => {
+  finalizeStreamingMessage: (_messageId: string, message: Message) => {
     const { streamingSessionId } = get();
 
     if (streamingSessionId) {
@@ -1106,11 +1111,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
     persistComputerState(get, sessionId);
   },
 
+  setAgentRunStartIndex: (sessionId: string) => {
+    set((state) => {
+      const agentRunStartIndex = new Map(state.agentRunStartIndex);
+      const stepCount = state.agentSteps.get(sessionId)?.steps.length ?? 0;
+      agentRunStartIndex.set(sessionId, stepCount);
+      return { agentRunStartIndex };
+    });
+  },
+
+  associateAgentStepsWithMessage: (sessionId: string, messageId: string) => {
+    set((state) => {
+      const agentSteps = new Map(state.agentSteps);
+      const existing = agentSteps.get(sessionId);
+      if (!existing || existing.steps.length === 0) return state;
+      const steps = existing.steps.map((step) =>
+        step.messageId ? step : { ...step, messageId }
+      );
+      agentSteps.set(sessionId, { ...existing, steps });
+      return { agentSteps };
+    });
+    persistComputerState(get, sessionId);
+  },
+
   clearAgentSteps: (sessionId: string) => {
     set((state) => {
       const agentSteps = new Map(state.agentSteps);
+      const agentRunStartIndex = new Map(state.agentRunStartIndex);
       agentSteps.delete(sessionId);
-      return { agentSteps };
+      agentRunStartIndex.delete(sessionId);
+      return { agentSteps, agentRunStartIndex };
     });
     persistComputerState(get, sessionId);
   },

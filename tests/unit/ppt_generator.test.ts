@@ -7,6 +7,10 @@ import { PptGeneratorTool } from '../../apps/api/src/services/tools/ppt_generato
 import type { ToolContext } from '../../apps/api/src/services/tools/types';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 describe('PptGeneratorTool', () => {
   const mockWorkspaceDir = '/tmp/test-ppt-workspace';
@@ -230,5 +234,62 @@ describe('PptGeneratorTool', () => {
     expect(result.artifacts).toHaveLength(1);
     expect(result.artifacts![0].type).toBe('file');
     expect(result.artifacts![0].mimeType).toContain('presentationml.presentation');
+  });
+
+  it('should support strategic fields and render native bullets (no unicode bullet glyph)', async () => {
+    const tool = new PptGeneratorTool(mockContext);
+
+    const result = await tool.execute({
+      presentation: {
+        title: 'Strategy Deck',
+        slides: [
+          {
+            title: 'Operating Priorities',
+            keyInsight: 'Speed to decision is now a competitive moat.',
+            source: 'Source: Internal planning memo',
+            content: ['We need tighter execution loops across research and product teams.'],
+            bullets: ['• Focus on top-decile opportunities', '- Eliminate low-impact work'],
+          },
+        ],
+      },
+      filename: 'strategy-quality-check.pptx',
+    });
+
+    expect(result.success).toBe(true);
+
+    const filePath = path.join(mockOutputDir, 'strategy-quality-check.pptx');
+    const { stdout } = await execFileAsync('unzip', ['-p', filePath, 'ppt/slides/slide2.xml']);
+
+    expect(stdout).toContain('Speed to decision is now a competitive moat.');
+    expect(stdout).toContain('Source: Internal planning memo');
+    expect(stdout).not.toContain('• Focus on top-decile opportunities');
+  });
+
+  it('should return slide preview snapshots for computer timeline', async () => {
+    const tool = new PptGeneratorTool(mockContext);
+    const result = await tool.execute({
+      presentation: {
+        title: 'Preview Snapshot Deck',
+        subtitle: 'For timeline visual checkpoints',
+        slides: [
+          {
+            title: 'Slide A',
+            content: ['Narrative A'],
+            bullets: ['Point A1', 'Point A2'],
+          },
+          {
+            title: 'Slide B',
+            content: ['Narrative B'],
+            bullets: ['Point B1', 'Point B2'],
+          },
+        ],
+      },
+      filename: 'preview-snapshots.pptx',
+    });
+
+    expect(result.success).toBe(true);
+    expect(Array.isArray(result.previewSnapshots)).toBe(true);
+    expect(result.previewSnapshots!.length).toBeGreaterThanOrEqual(3); // title + 2 content previews
+    expect(result.previewSnapshots![0]).toMatch(/^data:image\/svg\+xml/);
   });
 });

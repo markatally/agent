@@ -3,7 +3,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { useChatStore } from '../../stores/chatStore';
-import { cn } from '../../lib/utils';
 import { StatusIcon } from '../ui/status-icon';
 
 interface ReasoningTimelineProps {

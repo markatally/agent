@@ -3,7 +3,6 @@ import { persist } from 'zustand/middleware';
 import type { User } from '@mark/shared';
 import {
   apiClient,
-  setTokens,
   clearTokens,
   getAccessToken,
   registerAuthStoreSyncHandlers,

@@ -50,6 +50,14 @@ describe('web_search temporal constraints', () => {
     const timestamp = parsePublishedDate('2026-02-11T07:30:00Z');
     expect(timestamp?.precision).toBe('timestamp');
     expect(timestamp?.utcMs).toBe(Date.parse('2026-02-11T07:30:00.000Z'));
+
+    const epochSeconds = parsePublishedDate('1739271600');
+    expect(epochSeconds?.precision).toBe('timestamp');
+    expect(epochSeconds?.utcMs).toBe(1739271600 * 1000);
+
+    const relative = parsePublishedDate('3 hours ago', Date.parse('2026-02-11T12:00:00.000Z'));
+    expect(relative?.precision).toBe('timestamp');
+    expect(relative?.utcMs).toBe(Date.parse('2026-02-11T09:00:00.000Z'));
   });
 
   it('filters stale, undated, and low-precision results for strict 24-hour requests', async () => {
@@ -106,5 +114,61 @@ describe('web_search temporal constraints', () => {
     expect(payload.temporalFilterStats.outOfWindow).toBe(1);
     expect(payload.temporalFilterStats.missingDate).toBe(1);
     expect(payload.temporalFilterStats.lowPrecision).toBe(1);
+  });
+
+  it('falls back to alternate provider when primary returns no temporal matches', async () => {
+    const nowMs = Date.parse('2026-02-11T12:00:00.000Z');
+    Date.now = () => nowMs;
+    process.env.TAVILY_API_KEY = 'test-key';
+    process.env.BRAVE_SEARCH_API_KEY = 'test-brave-key';
+
+    let callCount = 0;
+    globalThis.fetch = (async (url: string | URL) => {
+      callCount += 1;
+      const requestUrl = String(url);
+      if (requestUrl.includes('api.tavily.com')) {
+        return new Response(
+          JSON.stringify({
+            results: [
+              {
+                title: 'No timestamp from primary',
+                url: 'https://example.com/no-ts',
+                content: 'Undated',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          results: [
+            {
+              title: 'Fresh from fallback',
+              url: 'https://example.com/fallback',
+              description: 'Published recently',
+              published_time: '2 hours ago',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as typeof fetch;
+
+    const tool = new WebSearchTool(mockContext);
+    const result = await tool.execute({ query: 'medicine industry news in the last 24 hours' });
+    expect(result.success).toBe(true);
+    expect(result.warning).toBeUndefined();
+    expect(result.output).toContain('Fresh from fallback');
+
+    const artifact = result.artifacts?.find((item) => item.name === 'search-results.json');
+    expect(artifact).toBeTruthy();
+    const payload = JSON.parse(artifact!.content);
+    expect(payload.provider).toBe('tavily+brave');
+    expect(payload.results).toHaveLength(1);
+    expect(payload.results[0].title).toBe('Fresh from fallback');
+    expect(payload.temporalFilterStats.missingDate).toBe(1);
+    expect(callCount).toBe(2);
   });
 });

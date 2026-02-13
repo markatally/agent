@@ -35,6 +35,8 @@ type TemporalFilterStats = {
   lowPrecision: number;
 };
 
+type ParsedPublishedDate = { utcMs: number; precision: 'timestamp' | 'day' };
+
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
@@ -48,10 +50,42 @@ function isTimePrecisionDate(raw: string): boolean {
 }
 
 export function parsePublishedDate(
-  rawValue: string | undefined
-): { utcMs: number; precision: 'timestamp' | 'day' } | null {
+  rawValue: string | undefined,
+  nowMs: number = Date.now()
+): ParsedPublishedDate | null {
   const raw = rawValue?.trim();
   if (!raw) return null;
+  const normalized = raw.toLowerCase();
+
+  if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric)) return null;
+    const utcMs = raw.length === 13 ? numeric : numeric * 1000;
+    return { utcMs, precision: 'timestamp' };
+  }
+
+  const relativeMatch = normalized.match(
+    /^(\d{1,3})\s+(minute|minutes|min|hour|hours|hr|hrs|day|days)\s+ago$/
+  );
+  if (relativeMatch) {
+    const amount = Number(relativeMatch[1]);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const unit = relativeMatch[2];
+    const unitMs = unit.startsWith('min')
+      ? 60 * 1000
+      : unit.startsWith('hour') || unit.startsWith('hr')
+        ? HOUR_MS
+        : DAY_MS;
+    return { utcMs: nowMs - amount * unitMs, precision: 'timestamp' };
+  }
+
+  if (normalized === 'yesterday') {
+    return { utcMs: startOfUtcDayMs(nowMs) - DAY_MS, precision: 'day' };
+  }
+
+  if (normalized === 'today') {
+    return { utcMs: startOfUtcDayMs(nowMs), precision: 'day' };
+  }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     const parsed = Date.parse(`${raw}T00:00:00.000Z`);
@@ -246,9 +280,49 @@ export class WebSearchTool implements Tool {
       };
 
       if (temporalConstraint) {
-        const filtered = this.applyTemporalConstraint(results, temporalConstraint);
+        let filtered = this.applyTemporalConstraint(results, temporalConstraint, startTime);
         results = filtered.results;
         temporalFilterStats = filtered.stats;
+
+        // If strict temporal filtering empties results, retry with the alternate provider (if configured).
+        if (results.length === 0) {
+          if (provider === 'tavily' && braveKey) {
+            onProgress?.(45, 100, 'Retrying temporal search with Brave...');
+            const braveResults = this.normalizePublishedDates(
+              await this.searchWithBrave({
+                apiKey: braveKey,
+                query,
+                topic,
+                maxResults,
+                includeContent,
+              })
+            );
+            filtered = this.applyTemporalConstraint(braveResults, temporalConstraint, startTime);
+            if (filtered.results.length > 0) {
+              provider = 'tavily+brave';
+              results = filtered.results;
+              temporalFilterStats = this.sumTemporalStats(temporalFilterStats, filtered.stats);
+            }
+          } else if (provider === 'brave' && tavilyKey) {
+            onProgress?.(45, 100, 'Retrying temporal search with Tavily...');
+            const tavilyResults = this.normalizePublishedDates(
+              await this.searchWithTavily({
+                apiKey: tavilyKey,
+                query,
+                topic,
+                maxResults,
+                includeContent,
+                searchDepth,
+              })
+            );
+            filtered = this.applyTemporalConstraint(tavilyResults, temporalConstraint, startTime);
+            if (filtered.results.length > 0) {
+              provider = 'brave+tavily';
+              results = filtered.results;
+              temporalFilterStats = this.sumTemporalStats(temporalFilterStats, filtered.stats);
+            }
+          }
+        }
       }
 
       onProgress?.(80, 100, 'Formatting results...');
@@ -399,9 +473,18 @@ export class WebSearchTool implements Tool {
     });
   }
 
+  private sumTemporalStats(a: TemporalFilterStats, b: TemporalFilterStats): TemporalFilterStats {
+    return {
+      outOfWindow: a.outOfWindow + b.outOfWindow,
+      missingDate: a.missingDate + b.missingDate,
+      lowPrecision: a.lowPrecision + b.lowPrecision,
+    };
+  }
+
   private applyTemporalConstraint(
     results: WebSearchResult[],
-    constraint: WebSearchTemporalConstraint
+    constraint: WebSearchTemporalConstraint,
+    nowMs: number = Date.now()
   ): { results: WebSearchResult[]; stats: TemporalFilterStats } {
     const stats: TemporalFilterStats = {
       outOfWindow: 0,
@@ -411,7 +494,7 @@ export class WebSearchTool implements Tool {
     const filtered: WebSearchResult[] = [];
 
     for (const result of results) {
-      const parsed = parsePublishedDate(result.publishedDate);
+      const parsed = parsePublishedDate(result.publishedDate, nowMs);
       if (!parsed) {
         stats.missingDate += 1;
         continue;
@@ -434,8 +517,8 @@ export class WebSearchTool implements Tool {
 
     // Keep most recent first when temporal constraints are active.
     filtered.sort((a, b) => {
-      const aMs = parsePublishedDate(a.publishedDate)?.utcMs ?? 0;
-      const bMs = parsePublishedDate(b.publishedDate)?.utcMs ?? 0;
+      const aMs = parsePublishedDate(a.publishedDate, nowMs)?.utcMs ?? 0;
+      const bMs = parsePublishedDate(b.publishedDate, nowMs)?.utcMs ?? 0;
       return bMs - aMs;
     });
 
