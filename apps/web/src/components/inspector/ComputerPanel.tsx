@@ -168,6 +168,29 @@ function normalizeUrl(raw: string): string {
   }
 }
 
+function buildFallbackStepSnapshot(label: string, url?: string): string {
+  const safeLabel = (label || 'Agent step').replace(/[<>&"]/g, '');
+  const safeUrl = (url || '').replace(/[<>&"]/g, '');
+  const subtitle = safeUrl ? safeUrl.slice(0, 90) : 'Visual snapshot synthesized from timeline metadata';
+  const safeSubtitle = subtitle.replace(/[<>&"]/g, '');
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1E3A8A"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <rect x="80" y="90" width="1120" height="540" rx="24" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+  <text x="120" y="245" fill="#DBEAFE" font-size="30" font-family="Calibri, Arial, sans-serif">Computer Timeline Snapshot</text>
+  <text x="120" y="320" fill="#FFFFFF" font-size="52" font-family="Cambria, Georgia, serif" font-weight="700">${safeLabel}</text>
+  <text x="120" y="390" fill="#BFDBFE" font-size="24" font-family="Calibri, Arial, sans-serif">${safeSubtitle}</text>
+</svg>
+  `.trim();
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps) {
   const selectedMessageId = useChatStore((state) => state.selectedMessageId);
   const messages = useChatStore((state) => state.messages.get(sessionId) || []);
@@ -224,6 +247,9 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
   const currentStepStatus = currentStepEntry?.status || 'pending';
 
   const activityLabel = useMemo(() => {
+    if (currentStepStatus === 'failed') {
+      return 'PPT generation encountered an error';
+    }
     if (currentPipelineStep === 'finalizing' && currentStepStatus === 'completed') {
       return 'Output ready';
     }
@@ -273,9 +299,14 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
   const scopeMessageId = selectedMessageId ?? (isSessionStreaming ? null : latestAssistantMessageId);
   const allAgentSteps = agentTimeline?.steps ?? [];
   const scopedAgentSteps = useMemo(() => {
+    const hasMessageScopedSteps = allAgentSteps.some((step) => typeof step.messageId === 'string');
     if (scopeMessageId) {
       const explicit = allAgentSteps.filter((step) => step.messageId === scopeMessageId);
       if (explicit.length > 0) return explicit;
+      if (!hasMessageScopedSteps && messages.filter((message) => message.role === 'assistant').length <= 1) {
+        return allAgentSteps;
+      }
+      return [];
     }
     if (isSessionStreaming) {
       if (
@@ -289,8 +320,8 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
       const inFlight = allAgentSteps.filter((step) => !step.messageId);
       if (inFlight.length > 0) return inFlight;
     }
-    return allAgentSteps;
-  }, [allAgentSteps, scopeMessageId, isSessionStreaming, agentRunStartIndex]);
+    return [];
+  }, [allAgentSteps, scopeMessageId, isSessionStreaming, agentRunStartIndex, messages]);
   const scopedIndices = useMemo(
     () => scopedAgentSteps.map((step) => allAgentSteps.indexOf(step)),
     [allAgentSteps, scopedAgentSteps]
@@ -342,10 +373,12 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
       ? selectedSnapshotUrl ??
         getNearestTimelineScreenshot(agentSteps, agentCurrentIndex) ??
         getUrlMatchedScreenshot(browserActions, replayUrl) ??
-        getUrlMatchedScreenshot(browseResults, replayUrl)
+        getUrlMatchedScreenshot(browseResults, replayUrl) ??
+        buildFallbackStepSnapshot(selectedStepTitle ?? actionLabel, replayUrl || undefined)
       : browserActions[browserCurrentIndex]?.screenshotDataUrl ??
         getUrlMatchedScreenshot(browserActions, replayUrl) ??
-        getLatestBrowserActionScreenshot(browserActions);
+        getLatestBrowserActionScreenshot(browserActions) ??
+        buildFallbackStepSnapshot(actionLabel, replayUrl || undefined);
     const shouldRenderReplayViewport = replayLive || Boolean(replaySnapshot);
     return (
       <div className="flex min-h-0 flex-col">
@@ -467,8 +500,10 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
                 ? selectedSnapshotUrl ??
                   getNearestTimelineScreenshot(agentSteps, agentCurrentIndex) ??
                   getUrlMatchedScreenshot(browserActions, viewportUrl) ??
-                  getUrlMatchedScreenshot(browseResults, viewportUrl)
-                : browserActions[browserCurrentIndex]?.screenshotDataUrl ?? null;
+                  getUrlMatchedScreenshot(browseResults, viewportUrl) ??
+                  buildFallbackStepSnapshot(selectedStepTitle ?? actionLabel, viewportUrl || undefined)
+                : browserActions[browserCurrentIndex]?.screenshotDataUrl ??
+                  buildFallbackStepSnapshot(actionLabel, viewportUrl || undefined);
               const timelineIndex = hasTimeline ? agentCurrentIndex : browserCurrentIndex;
               const timelineTotal = hasTimeline ? agentSteps.length : browserActions.length;
               const timelineIsLive = isSessionStreaming && (hasTimeline ? isAtLatestAgentStep : isAtLatestAction);
@@ -692,10 +727,17 @@ export function ComputerPanel({ sessionId, compact = false }: ComputerPanelProps
                     'h-1.5 w-1.5 rounded-full',
                     currentStepStatus === 'running' && 'bg-emerald-500',
                     currentStepStatus === 'completed' && 'bg-emerald-500',
+                    currentStepStatus === 'failed' && 'bg-red-500',
                     currentStepStatus === 'pending' && 'bg-muted-foreground/50'
                   )}
                 />
-                {currentStepStatus === 'completed' ? 'Completed' : currentStepStatus === 'running' ? 'Active' : 'Pending'}
+                {currentStepStatus === 'completed'
+                  ? 'Completed'
+                  : currentStepStatus === 'running'
+                    ? 'Active'
+                    : currentStepStatus === 'failed'
+                      ? 'Failed'
+                      : 'Pending'}
               </div>
             </div>
           </div>

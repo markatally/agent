@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { DocumentCanvas } from '../canvas/DocumentCanvas';
 import { ChatInput } from './ChatInput';
 import { apiClient, type SSEEvent, ApiError } from '../../lib/api';
+import { SSEClient } from '../../lib/sse';
 import { useChatStore } from '../../stores/chatStore';
 import { useSession } from '../../hooks/useSessions';
 import { useToast } from '../../hooks/use-toast';
@@ -17,10 +18,16 @@ interface ChatContainerProps {
   onOpenSkills?: () => void;
 }
 
-function buildPipelineStageSnapshot(label: string, status: 'running' | 'completed'): string {
-  const bg = status === 'completed' ? '#0F766E' : '#1D4ED8';
-  const badge = status === 'completed' ? '#10B981' : '#60A5FA';
-  const statusText = status === 'completed' ? 'Completed' : 'In Progress';
+function buildPipelineStageSnapshot(
+  label: string,
+  status: 'running' | 'completed' | 'failed'
+): string {
+  const bg =
+    status === 'completed' ? '#0F766E' : status === 'failed' ? '#7F1D1D' : '#1D4ED8';
+  const badge =
+    status === 'completed' ? '#10B981' : status === 'failed' ? '#EF4444' : '#60A5FA';
+  const statusText =
+    status === 'completed' ? 'Completed' : status === 'failed' ? 'Failed' : 'In Progress';
   const safeLabel = label.replace(/[<>&"]/g, '');
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
@@ -56,6 +63,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const [isSending, setIsSending] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeSseClientRef = useRef<SSEClient | null>(null);
   const initialMessageHandledRef = useRef(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -126,6 +134,14 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
     setSelectedMessageId(null);
     loadComputerStateFromStorage(sessionId);
   }, [sessionId, clearToolCalls, clearTables, clearFiles, setSelectedMessageId, loadComputerStateFromStorage]);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+      activeSseClientRef.current?.close();
+      activeSseClientRef.current = null;
+    };
+  }, [sessionId]);
 
   // Scroll to bottom helper
   const scrollToBottom = () => {
@@ -273,6 +289,20 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
 
       case 'tool.complete':
         if (event.data) {
+          if (Array.isArray(event.data.artifacts)) {
+            for (const artifact of event.data.artifacts) {
+              if (!artifact?.name) continue;
+              addFileArtifact(sessionId, {
+                type: artifact.type || 'file',
+                name: artifact.name,
+                content: '',
+                mimeType: artifact.mimeType,
+                fileId: artifact.fileId,
+                size: artifact.size,
+              });
+            }
+          }
+
           if (event.data.toolName === 'web_search') {
             openComputerInspector();
             appendWebSearchResultSteps(event.data);
@@ -317,6 +347,22 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
 
       case 'tool.error':
         if (event.data) {
+          if (event.data.toolName === 'ppt_generator') {
+            updatePptStep(sessionId, 'generating', 'failed');
+            const stageStepIndex = pipelineStageStepIndexRef.current.get('generating');
+            if (typeof stageStepIndex === 'number') {
+              updateAgentStepAt(sessionId, stageStepIndex, {
+                output: 'Generating files failed',
+              });
+              updateAgentStepSnapshotAt(sessionId, stageStepIndex, {
+                timestamp: Date.now(),
+                screenshot: buildPipelineStageSnapshot('Generating files', 'failed'),
+                metadata: {
+                  actionDescription: 'PPT stage: Generating files (failed)',
+                },
+              });
+            }
+          }
           const toolResult: import('@mark/shared').ToolResult = {
             success: false,
             output: '',
@@ -408,7 +454,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
           updatePptStep(sessionId, event.data.step, event.data.status);
           const stepKey = String(event.data.step);
           const label = String(event.data.label || event.data.step);
-          const status = event.data.status as 'pending' | 'running' | 'completed';
+          const status = event.data.status as 'pending' | 'running' | 'completed' | 'failed';
 
           if (status === 'running' && !pipelineStageStepIndexRef.current.has(stepKey)) {
             const nextStepIndex =
@@ -451,6 +497,35 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
                   screenshot: buildPipelineStageSnapshot(label, 'completed'),
                   metadata: {
                     actionDescription: `PPT stage: ${label} (completed)`,
+                  },
+                },
+              });
+            }
+          }
+
+          if (status === 'failed') {
+            const stageStepIndex = pipelineStageStepIndexRef.current.get(stepKey);
+            if (typeof stageStepIndex === 'number') {
+              updateAgentStepAt(sessionId, stageStepIndex, {
+                output: `${label} failed`,
+              });
+              updateAgentStepSnapshotAt(sessionId, stageStepIndex, {
+                timestamp: Date.now(),
+                screenshot: buildPipelineStageSnapshot(label, 'failed'),
+                metadata: {
+                  actionDescription: `PPT stage: ${label} (failed)`,
+                },
+              });
+            } else {
+              appendAgentStep(sessionId, {
+                type: 'tool',
+                output: `${label} failed`,
+                snapshot: {
+                  stepIndex: 0,
+                  timestamp: Date.now(),
+                  screenshot: buildPipelineStageSnapshot(label, 'failed'),
+                  metadata: {
+                    actionDescription: `PPT stage: ${label} (failed)`,
                   },
                 },
               });
@@ -765,6 +840,8 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
 
     setIsSending(true);
     abortControllerRef.current?.abort();
+    activeSseClientRef.current?.close();
+    activeSseClientRef.current = null;
     abortControllerRef.current = new AbortController();
 
     try {
@@ -805,14 +882,52 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
         setInspectorOpen(true);
       }
 
-      // Stream response from backend
-      for await (const event of apiClient.chat.sendAndStream(
-        sessionId,
-        content,
-        abortControllerRef.current.signal
-      )) {
-        handleSSEEvent(event);
-      }
+      // Persist the user message first, then stream assistant response via EventSource SSE.
+      await apiClient.messages.create(sessionId, content);
+
+      await new Promise<void>((resolve, reject) => {
+        let done = false;
+        const streamUrl = apiClient.chat.getStreamUrl(sessionId);
+        const sseClient = new SSEClient();
+        activeSseClientRef.current = sseClient;
+
+        const finish = (next: () => void) => {
+          if (done) return;
+          done = true;
+          sseClient.close();
+          if (activeSseClientRef.current === sseClient) {
+            activeSseClientRef.current = null;
+          }
+          next();
+        };
+
+        const abortListener = () => {
+          finish(() => reject(new DOMException('Aborted', 'AbortError')));
+        };
+        abortControllerRef.current?.signal.addEventListener('abort', abortListener, { once: true });
+
+        sseClient.connect(streamUrl, {
+          onEvent: (event) => {
+            handleSSEEvent(event as SSEEvent);
+            if (event.type === 'message.complete') {
+              finish(resolve);
+            } else if (event.type === 'error') {
+              const message = event.data?.message || 'Stream error';
+              finish(() => reject(new Error(message)));
+            }
+          },
+          onError: (error) => {
+            finish(() => reject(error));
+          },
+          onClose: () => {
+            if (!done) {
+              finish(() => reject(new Error('SSE stream closed before completion')));
+            }
+          },
+          reconnect: true,
+          maxReconnectAttempts: 3,
+        });
+      });
 
       // Note: message.complete handler already invalidates queries, no need to duplicate here
     } catch (error: any) {
@@ -851,6 +966,8 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
 
   const handleStopStreaming = () => {
     abortControllerRef.current?.abort();
+    activeSseClientRef.current?.close();
+    activeSseClientRef.current = null;
     stopStreaming();
     setIsSending(false);
   };

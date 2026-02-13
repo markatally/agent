@@ -15,7 +15,8 @@ export function PptPipelineTimeline({ steps }: PptPipelineTimelineProps) {
               'mt-1 h-2.5 w-2.5 rounded-full',
               step.status === 'pending' && 'bg-muted-foreground/40',
               step.status === 'running' && 'bg-blue-500 animate-pulse',
-              step.status === 'completed' && 'bg-emerald-500'
+              step.status === 'completed' && 'bg-emerald-500',
+              step.status === 'failed' && 'bg-red-500'
             )}
           />
           <div className="min-w-0">

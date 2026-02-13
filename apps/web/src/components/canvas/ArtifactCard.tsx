@@ -3,7 +3,7 @@ import type { Artifact } from '@mark/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { triggerDownload } from '../../lib/download';
+import { triggerDownload, triggerDownloadByFilename } from '../../lib/download';
 
 interface ArtifactCardProps {
   artifact: Artifact;
@@ -35,13 +35,12 @@ async function handleDownload(
   fileId: string | undefined,
   filename: string
 ): Promise<void> {
-  if (!fileId) {
-    console.error('No fileId provided for download');
-    return;
-  }
-
   try {
-    await triggerDownload(sessionId, fileId, filename);
+    if (fileId) {
+      await triggerDownload(sessionId, fileId, filename);
+      return;
+    }
+    await triggerDownloadByFilename(sessionId, filename);
   } catch (error) {
     console.error('Download failed:', error);
     alert(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -72,7 +71,7 @@ export function ArtifactCard({ artifact, sessionId }: ArtifactCardProps) {
             </div>
           </div>
 
-          {artifact.type === 'file' && artifact.fileId ? (
+          {artifact.type === 'file' && artifact.name ? (
             <Button
               size="sm"
               onClick={() => handleDownload(sessionId, artifact.fileId, artifact.name)}

@@ -14,6 +14,7 @@ import {
 } from '../services/files';
 import { generateDownloadToken } from '../services/auth';
 import path from 'path';
+import { promises as fs } from 'fs';
 
 const files = new Hono<AuthContext>();
 
@@ -245,6 +246,74 @@ files.post('/sessions/:sessionId/files/:fileId/download-token', async (c) => {
     token,
     url,
   });
+});
+
+/**
+ * GET /api/sessions/:sessionId/files/by-name/:filename/download
+ * Download generated PPT directly by filename when DB metadata is unavailable
+ */
+files.get('/sessions/:sessionId/files/by-name/:filename/download', async (c) => {
+  const user = c.get('user');
+  const sessionId = c.req.param('sessionId');
+  const filename = c.req.param('filename');
+
+  const session = await prisma.session.findUnique({
+    where: {
+      id: sessionId,
+      userId: user.userId,
+    },
+  });
+
+  if (!session) {
+    return c.json(
+      {
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found',
+        },
+      },
+      404
+    );
+  }
+
+  const safeFilename = path.basename(filename || '');
+  if (!safeFilename || !safeFilename.toLowerCase().endsWith('.pptx')) {
+    return c.json(
+      {
+        error: {
+          code: 'INVALID_FILENAME',
+          message: 'Only .pptx filenames are supported',
+        },
+      },
+      400
+    );
+  }
+
+  const fallbackPath = path.join(process.cwd(), 'outputs', 'ppt', safeFilename);
+  try {
+    const fileBuffer = await fs.readFile(fallbackPath);
+    c.header(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    );
+    c.header(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(safeFilename)}"`
+    );
+    c.header('Content-Length', fileBuffer.length.toString());
+    c.header('Cache-Control', 'no-cache');
+    return c.body(fileBuffer);
+  } catch (error: any) {
+    return c.json(
+      {
+        error: {
+          code: 'FILE_NOT_FOUND',
+          message: error?.message || 'File not found',
+        },
+      },
+      404
+    );
+  }
 });
 
 /**

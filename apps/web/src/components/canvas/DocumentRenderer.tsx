@@ -10,6 +10,7 @@ import { ArtifactCard } from './ArtifactCard';
 import { ThinkingIndicator } from '../chat/ThinkingIndicator';
 import { cn } from '../../lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
+import type { Artifact } from '@mark/shared';
 
 interface DocumentRendererProps {
   sessionId: string;
@@ -22,7 +23,7 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
   const isStreaming = useChatStore((state) => state.isStreaming);
   const isThinking = useChatStore((state) => state.isThinking);
   const streamingSessionId = useChatStore((state) => state.streamingSessionId);
-  const files = useChatStore((state) => state.files.get(sessionId) || []);
+  const toolCalls = useChatStore((state) => state.toolCalls);
   const selectedMessageId = useChatStore((state) => state.selectedMessageId);
   const setSelectedMessageId = useChatStore((state) => state.setSelectedMessageId);
   const setInspectorOpen = useChatStore((state) => state.setInspectorOpen);
@@ -59,6 +60,35 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
   const userMessageHasAssistant = useCallback(
     (userMessageId: string) => !!findNextAssistantMessageId(userMessageId),
     [findNextAssistantMessageId]
+  );
+
+  const getArtifactsForMessage = useCallback(
+    (messageId: string): Artifact[] => {
+      const artifacts: Artifact[] = [];
+      const dedupe = new Set<string>();
+
+      for (const call of toolCalls.values()) {
+        if (call.sessionId !== sessionId || call.messageId !== messageId) continue;
+        const callArtifacts = Array.isArray(call.result?.artifacts) ? call.result.artifacts : [];
+        for (const artifact of callArtifacts) {
+          if (!artifact?.name) continue;
+          const key = `${artifact.fileId || ''}:${artifact.name}`;
+          if (dedupe.has(key)) continue;
+          dedupe.add(key);
+          artifacts.push({
+            type: artifact.type || 'file',
+            name: artifact.name,
+            content: '',
+            mimeType: artifact.mimeType,
+            fileId: artifact.fileId,
+            size: artifact.size,
+          });
+        }
+      }
+
+      return artifacts;
+    },
+    [toolCalls, sessionId]
   );
 
   const lastUserMessageId = (() => {
@@ -165,9 +195,24 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
       <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6 px-4 pb-4 pt-8 md:px-6">
         {messages.map((message) => {
           if (message.role !== 'user') {
-            return message.content ? (
-              <ContentBlock key={message.id} content={message.content} />
-            ) : null;
+            if (!message.content) return null;
+            const artifacts = getArtifactsForMessage(message.id);
+            return (
+              <div key={message.id} className="space-y-3">
+                <ContentBlock content={message.content} />
+                {artifacts.length > 0 ? (
+                  <div className="space-y-3">
+                    {artifacts.map((artifact, index) => (
+                      <ArtifactCard
+                        key={`${message.id}-${artifact.fileId || artifact.name}-${index}`}
+                        artifact={artifact}
+                        sessionId={sessionId}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
           }
 
           if (!message.content) return null;
@@ -214,18 +259,6 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
         {isThinkingThisSession && !showStreamingContent ? (
           <div className="text-muted-foreground">
             <ThinkingIndicator />
-          </div>
-        ) : null}
-
-        {files.length > 0 ? (
-          <div className="space-y-3">
-            {files.map((artifact) => (
-              <ArtifactCard
-                key={`${artifact.name}-${artifact.fileId || artifact.content}`}
-                artifact={artifact}
-                sessionId={sessionId}
-              />
-            ))}
           </div>
         ) : null}
 

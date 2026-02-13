@@ -6,7 +6,7 @@ import { Badge } from '../ui/badge';
 import { cn } from '../../lib/utils';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { triggerDownload } from '../../lib/download';
+import { triggerDownload, triggerDownloadByFilename } from '../../lib/download';
 import { StatusIcon } from '../ui/status-icon';
 
 interface ToolCallDisplayProps {
@@ -46,13 +46,12 @@ async function handleDownload(
 ): Promise<void> {
   e.stopPropagation();
 
-  if (!fileId) {
-    console.error('No fileId provided for download');
-    return;
-  }
-
   try {
-    await triggerDownload(sessionId, fileId, filename);
+    if (fileId) {
+      await triggerDownload(sessionId, fileId, filename);
+      return;
+    }
+    await triggerDownloadByFilename(sessionId, filename);
   } catch (error) {
     console.error('Download failed:', error);
     alert(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -162,8 +161,7 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
                   </CardTitle>
                 </div>
                 {/* Show Download button for completed ppt_generator, otherwise show status badge */}
-                {toolName === 'ppt_generator' && 
-                 completedCall?.result?.artifacts?.[0]?.fileId ? (
+                {toolName === 'ppt_generator' && completedCall?.result?.artifacts?.[0]?.name ? (
                   <button
                     onClick={(e) => handleDownload(
                       e, 

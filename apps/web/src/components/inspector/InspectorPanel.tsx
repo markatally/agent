@@ -29,6 +29,7 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
   const toolCalls = useChatStore((state) => state.toolCalls);
   const executionSteps = useChatStore((state) => (sessionId ? state.executionSteps.get(sessionId) || [] : []));
   const browserSession = useChatStore((state) => (sessionId ? state.browserSession.get(sessionId) : undefined));
+  const pptPipeline = useChatStore((state) => (sessionId ? state.pptPipeline.get(sessionId) : undefined));
   const [width, setWidth] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored
@@ -105,7 +106,8 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
   const hasComputerActivity =
     executionSteps.length > 0 ||
     Boolean(browserSession) ||
-    (browserSession?.actions?.length ?? 0) > 0;
+    (browserSession?.actions?.length ?? 0) > 0 ||
+    Boolean(pptPipeline?.steps?.length);
   const sessionToolCalls = sessionId
     ? Array.from(toolCalls.values()).filter((call) => {
         if (call.sessionId !== sessionId) return false;
@@ -114,9 +116,10 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
       })
     : [];
   const hasFailedToolCall = sessionToolCalls.some((call) => call.status === 'failed');
+  const hasFailedPptStep = !!pptPipeline?.steps?.some((step) => step.status === 'failed');
   const computerStatusLabel = (!isViewingHistorical && isSessionStreaming) || browserSession?.status === 'launching'
     ? 'Live'
-    : hasFailedExecution
+    : hasFailedExecution || hasFailedToolCall || hasFailedPptStep
       ? 'Failed'
       : hasComputerActivity
         ? 'Completed'

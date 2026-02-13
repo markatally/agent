@@ -99,6 +99,16 @@ export class PptPipelineController {
         }
         break;
       }
+      case 'tool.error': {
+        const toolName = event.data?.toolName;
+        if (toolName === 'ppt_generator') {
+          await this.failStep('generating');
+          if (this.finalizingStarted) {
+            await this.failStep('finalizing');
+          }
+        }
+        break;
+      }
       case 'file.created': {
         const filename = event.data?.filename || '';
         const mimeType = event.data?.mimeType || '';
@@ -179,6 +189,13 @@ export class PptPipelineController {
     const target = this.state.steps.find((step) => step.id === stepId);
     if (!target || target.status === 'completed') return;
     target.status = 'completed';
+    await this.emitStep(target);
+  }
+
+  private async failStep(stepId: PptStep) {
+    const target = this.state.steps.find((step) => step.id === stepId);
+    if (!target || target.status === 'completed' || target.status === 'failed') return;
+    target.status = 'failed';
     await this.emitStep(target);
   }
 

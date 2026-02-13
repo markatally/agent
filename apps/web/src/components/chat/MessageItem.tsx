@@ -11,7 +11,7 @@ import { useChatStore } from '../../stores/chatStore';
 import { InteractiveTable } from './InteractiveTable';
 import { parseContentWithTables } from '../../lib/tableParser';
 import { Button } from '../ui/button';
-import { triggerDownload } from '../../lib/download';
+import { triggerDownload, triggerDownloadByFilename } from '../../lib/download';
 
 interface MessageItemProps {
   message: Message;
@@ -240,17 +240,39 @@ function parseMessageContent(content: string): Array<{ type: 'text' | 'table'; v
 
 export function MessageItem({ message, isStreaming }: MessageItemProps) {
   const isUser = message.role === 'user';
-  const sessionMessages = useChatStore((state) => state.messages.get(message.sessionId) || []);
-  const fileArtifacts = useChatStore((state) => state.files.get(message.sessionId) || []);
-  const lastAssistantMessageId = useMemo(() => {
-    const lastAssistant = [...sessionMessages].reverse().find((msg) => msg.role === 'assistant');
-    return lastAssistant?.id;
-  }, [sessionMessages]);
-  const pptArtifacts = fileArtifacts.filter(
-    (artifact) =>
-      artifact.name?.toLowerCase().endsWith('.pptx') ||
-      artifact.mimeType?.includes('presentation')
-  );
+  const toolCalls = useChatStore((state) => state.toolCalls);
+  const pptArtifacts = useMemo(() => {
+    const artifacts: Array<{
+      name: string;
+      fileId?: string;
+      size?: number;
+      mimeType?: string;
+    }> = [];
+    const dedupe = new Set<string>();
+
+    for (const toolCall of toolCalls.values()) {
+      if (toolCall.sessionId !== message.sessionId || toolCall.messageId !== message.id) continue;
+      const callArtifacts = Array.isArray(toolCall.result?.artifacts) ? toolCall.result?.artifacts : [];
+      for (const artifact of callArtifacts) {
+        if (!artifact?.name) continue;
+        const isPresentation =
+          artifact.name.toLowerCase().endsWith('.pptx') ||
+          artifact.mimeType?.includes('presentation');
+        if (!isPresentation) continue;
+        const key = `${artifact.fileId || ''}:${artifact.name}`;
+        if (dedupe.has(key)) continue;
+        dedupe.add(key);
+        artifacts.push({
+          name: artifact.name,
+          fileId: artifact.fileId,
+          size: artifact.size,
+          mimeType: artifact.mimeType,
+        });
+      }
+    }
+
+    return artifacts;
+  }, [toolCalls, message.sessionId, message.id]);
 
   // First check for explicit TABLE markers (from backend Table IR events)
   const explicitTableSegments = parseMessageContent(message.content);
@@ -356,7 +378,7 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
           )}
         </div>
 
-        {!isStreaming && message.id === lastAssistantMessageId && pptArtifacts.length > 0 ? (
+        {!isStreaming && pptArtifacts.length > 0 ? (
           <div className="not-prose space-y-2">
             {pptArtifacts.map((artifact) => (
               <div
@@ -377,11 +399,13 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => {
-                      if (!artifact.fileId) return;
-                      triggerDownload(message.sessionId, artifact.fileId, artifact.name);
+                    onClick={async () => {
+                      if (artifact.fileId) {
+                        await triggerDownload(message.sessionId, artifact.fileId, artifact.name);
+                        return;
+                      }
+                      await triggerDownloadByFilename(message.sessionId, artifact.name);
                     }}
-                    disabled={!artifact.fileId}
                   >
                     Download
                   </Button>

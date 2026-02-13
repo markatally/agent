@@ -90,6 +90,33 @@ const TEST_CASES = [
     expectedSuccess: true,
   },
   {
+    name: 'Robustness - Nested params with papers array',
+    input: {
+      input: {
+        presentation: {
+          title: 'Time Series Forecasting Papers',
+          slides: [],
+          papers: [
+            {
+              title: 'ProbFM',
+              abstract: 'Probabilistic time series foundation model with uncertainty estimation.',
+              link: 'https://arxiv.org/abs/2501.00001',
+              highlights: ['Foundation model', 'Uncertainty-aware forecasts'],
+            },
+            {
+              title: 'TimeSynth',
+              summary: 'Bias-aware forecasting for spatiotemporal systems.',
+              url: 'https://arxiv.org/abs/2501.00002',
+              keyPoints: ['Bias correction', 'Improved robustness'],
+            },
+          ],
+        },
+      },
+      filename: 'papers-nested.pptx',
+    },
+    expectedSuccess: true,
+  },
+  {
     name: 'Edge case - Missing title',
     input: {
       presentation: {
@@ -98,8 +125,7 @@ const TEST_CASES = [
       },
       filename: 'invalid-title.pptx',
     },
-    expectedSuccess: false,
-    expectedError: 'title',
+    expectedSuccess: true,
   },
   {
     name: 'Edge case - No slides',
@@ -110,8 +136,7 @@ const TEST_CASES = [
       },
       filename: 'no-slides.pptx',
     },
-    expectedSuccess: false,
-    expectedError: 'at least one slide',
+    expectedSuccess: true,
   },
   {
     name: 'Edge case - Empty presentation',
@@ -119,8 +144,7 @@ const TEST_CASES = [
       presentation: null,
     },
     filename: 'empty.pptx',
-    expectedSuccess: false,
-    expectedError: 'required',
+    expectedSuccess: true,
   },
 ];
 

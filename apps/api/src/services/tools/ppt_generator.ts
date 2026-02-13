@@ -173,7 +173,16 @@ export class PptGeneratorTool implements Tool {
         };
       }
 
-      let presentation = normalizedParams.presentation as Presentation;
+      const hasExplicitPresentationParam = normalizedParams.presentation !== undefined;
+
+      let presentation = this.extractPresentation(normalizedParams) as Presentation;
+      if (
+        !presentation &&
+        normalizedParams.presentation &&
+        typeof normalizedParams.presentation === 'object'
+      ) {
+        presentation = normalizedParams.presentation as Presentation;
+      }
 
       if (presentation && typeof (presentation as any).slides === 'string') {
         try {
@@ -192,15 +201,45 @@ export class PptGeneratorTool implements Tool {
           slides: presentation.slides.map((slide) => {
             if (!slide || typeof slide !== 'object') return slide;
             const normalizedSlide = { ...slide };
+            if (typeof normalizedSlide.title !== 'string') {
+              normalizedSlide.title = this.toSafeText(normalizedSlide.title) || 'Slide';
+            }
+            if (typeof normalizedSlide.notes !== 'string' && normalizedSlide.notes !== undefined) {
+              normalizedSlide.notes = this.toSafeText(normalizedSlide.notes);
+            }
+            if (
+              typeof normalizedSlide.keyInsight !== 'string' &&
+              normalizedSlide.keyInsight !== undefined
+            ) {
+              normalizedSlide.keyInsight = this.toSafeText(normalizedSlide.keyInsight);
+            }
+            if (typeof normalizedSlide.source !== 'string' && normalizedSlide.source !== undefined) {
+              normalizedSlide.source = this.toSafeText(normalizedSlide.source);
+            }
+
             if (typeof normalizedSlide.content === 'string') {
               normalizedSlide.content = [normalizedSlide.content];
+            }
+            if (Array.isArray(normalizedSlide.content)) {
+              normalizedSlide.content = normalizedSlide.content
+                .map((item) => this.toSafeText(item))
+                .filter(Boolean);
             }
             if (typeof normalizedSlide.bullets === 'string') {
               normalizedSlide.bullets = [normalizedSlide.bullets];
             }
+            if (Array.isArray(normalizedSlide.bullets)) {
+              normalizedSlide.bullets = normalizedSlide.bullets
+                .map((item) => this.toSafeText(item))
+                .filter(Boolean);
+            }
             return normalizedSlide;
           }),
         };
+      }
+
+      if (!hasExplicitPresentationParam) {
+        presentation = this.coercePresentationFromAlternatives(normalizedParams, presentation);
       }
 
       const filename = (normalizedParams.filename as string) || 'presentation.pptx';
@@ -712,16 +751,17 @@ The presentation is ready for download.`;
   }
 
   private deriveInsight(slide: Slide): string {
-    if (slide.keyInsight?.trim()) {
-      return this.truncate(slide.keyInsight.trim(), 130);
+    const keyInsight = this.toSafeText(slide.keyInsight);
+    if (keyInsight) {
+      return this.truncate(keyInsight, 130);
     }
-    const candidate = slide.bullets?.[0] || slide.content?.[0] || 'Key insight';
+    const candidate = this.toSafeText(slide.bullets?.[0]) || this.toSafeText(slide.content?.[0]) || 'Key insight';
     return this.truncate(`Insight: ${this.trimBulletPrefix(candidate)}`, 130);
   }
 
   private deriveStrategicTakeaway(slide: Slide): string {
-    const source = slide.bullets?.[0] || slide.content?.[0];
-    if (!source || !source.trim()) {
+    const source = this.toSafeText(slide.bullets?.[0]) || this.toSafeText(slide.content?.[0]);
+    if (!source) {
       return 'Prioritize execution sequencing and measurable outcomes for this topic.';
     }
     const clean = this.trimBulletPrefix(source);
@@ -737,8 +777,10 @@ The presentation is ready for download.`;
     return undefined;
   }
 
-  private trimBulletPrefix(value: string): string {
-    return value.replace(/^\s*[•\-*]\s*/, '').trim();
+  private trimBulletPrefix(value: unknown): string {
+    const normalized = this.toSafeText(value);
+    if (!normalized) return '';
+    return normalized.replace(/^\s*[•\-*]\s*/, '').trim();
   }
 
   private buildSlidePreviewSnapshots(presentation: Presentation): string[] {
@@ -987,10 +1029,161 @@ The presentation is ready for download.`;
     });
   }
 
-  private truncate(value: string, maxLen: number): string {
-    if (!value) return '';
-    const normalized = value.replace(/\s+/g, ' ').trim();
+  private truncate(value: unknown, maxLen: number): string {
+    const raw = this.toSafeText(value);
+    if (!raw) return '';
+    const normalized = raw.replace(/\s+/g, ' ').trim();
     if (normalized.length <= maxLen) return normalized;
     return `${normalized.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
+  }
+
+  private toSafeText(value: unknown): string {
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => this.toSafeText(item))
+        .filter(Boolean)
+        .join(' ');
+    }
+    if (value && typeof value === 'object') {
+      const candidate = (value as Record<string, unknown>).text;
+      if (typeof candidate === 'string') return candidate.trim();
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }
+
+  private extractPresentation(params: Record<string, any>): Presentation | undefined {
+    const candidates: unknown[] = [
+      params.presentation,
+      params.input?.presentation,
+      params.parameters?.presentation,
+      params.arguments?.presentation,
+      params.args?.presentation,
+      params.data?.presentation,
+      params.payload?.presentation,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && typeof candidate === 'object') {
+        return candidate as Presentation;
+      }
+    }
+    return undefined;
+  }
+
+  private coercePresentationFromAlternatives(
+    params: Record<string, any>,
+    presentation: Presentation | undefined
+  ): Presentation {
+    const candidate = (presentation && typeof presentation === 'object' ? { ...presentation } : {}) as Record<
+      string,
+      any
+    >;
+
+    if (typeof candidate.title !== 'string' || !candidate.title.trim()) {
+      candidate.title = this.toSafeText(params.title || params.topic || params.subject) || 'Generated Presentation';
+    }
+    if (!candidate.subtitle && params.subtitle) {
+      candidate.subtitle = this.toSafeText(params.subtitle);
+    }
+    if (!candidate.author && params.author) {
+      candidate.author = this.toSafeText(params.author);
+    }
+
+    if (!Array.isArray(candidate.slides)) {
+      if (typeof candidate.slides === 'string') {
+        try {
+          const parsed = JSON.parse(candidate.slides);
+          candidate.slides = parsed;
+        } catch {
+          candidate.slides = [];
+        }
+      } else if (candidate.slides && typeof candidate.slides === 'object') {
+        candidate.slides = Object.values(candidate.slides);
+      } else {
+        candidate.slides = [];
+      }
+    }
+
+    if (candidate.slides.length === 0) {
+      const papers = Array.isArray(params.papers)
+        ? params.papers
+        : Array.isArray(candidate.papers)
+          ? candidate.papers
+          : [];
+      if (papers.length > 0) {
+        candidate.slides = papers.slice(0, 12).map((paper: any, idx: number) => ({
+          title:
+            this.toSafeText(paper?.title || paper?.name || paper?.paperTitle) ||
+            `Paper ${idx + 1}`,
+          content: [
+            this.toSafeText(paper?.summary || paper?.abstract || paper?.description) ||
+              'Summary not provided.',
+          ],
+          bullets: Array.isArray(paper?.highlights)
+            ? paper.highlights
+            : Array.isArray(paper?.keyPoints)
+              ? paper.keyPoints
+              : [],
+          source: this.toSafeText(paper?.url || paper?.link || paper?.arxivUrl),
+        }));
+      }
+    }
+
+    if (candidate.slides.length === 0 && Array.isArray(params.sections)) {
+      candidate.slides = params.sections.slice(0, 12).map((section: any, idx: number) => ({
+        title: this.toSafeText(section?.title) || `Section ${idx + 1}`,
+        content: Array.isArray(section?.content)
+          ? section.content.map((item: unknown) => this.toSafeText(item)).filter(Boolean)
+          : [this.toSafeText(section?.content || section?.summary || section?.description) || ''],
+        bullets: Array.isArray(section?.bullets)
+          ? section.bullets.map((item: unknown) => this.toSafeText(item)).filter(Boolean)
+          : [],
+      }));
+    }
+
+    if (candidate.slides.length === 0 && this.toSafeText(params.content)) {
+      candidate.slides = [
+        {
+          title: 'Overview',
+          content: [this.toSafeText(params.content)],
+        },
+      ];
+    }
+
+    if (candidate.slides.length === 0) {
+      candidate.slides = [
+        {
+          title: 'Executive Summary',
+          content: [
+            this.toSafeText(params.summary || params.description || params.prompt) ||
+              'Summary prepared by Mark Agent based on the available research context.',
+          ],
+        },
+      ];
+    }
+
+    if (Array.isArray(candidate.slides)) {
+      candidate.slides = candidate.slides.map((slide: any, idx: number) => ({
+        title: this.toSafeText(slide?.title) || `Slide ${idx + 1}`,
+        content: Array.isArray(slide?.content)
+          ? slide.content.map((item: unknown) => this.toSafeText(item)).filter(Boolean)
+          : [this.toSafeText(slide?.content || slide?.summary || slide?.description) || ''],
+        bullets: Array.isArray(slide?.bullets)
+          ? slide.bullets.map((item: unknown) => this.toSafeText(item)).filter(Boolean)
+          : [],
+        notes: this.toSafeText(slide?.notes),
+        keyInsight: this.toSafeText(slide?.keyInsight || slide?.insight),
+        source: this.toSafeText(slide?.source || slide?.url || slide?.link),
+      }));
+    }
+
+    return candidate as Presentation;
   }
 }

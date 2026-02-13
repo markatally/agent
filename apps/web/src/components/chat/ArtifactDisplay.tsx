@@ -2,7 +2,7 @@ import { FileText, FileImage, FileCode, Download } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import type { Artifact } from '@mark/shared';
-import { triggerDownload } from '../../lib/download';
+import { triggerDownload, triggerDownloadByFilename } from '../../lib/download';
 
 interface ArtifactDisplayProps {
   artifact: Artifact;
@@ -46,13 +46,12 @@ async function handleDownload(
 ): Promise<void> {
   e.preventDefault();
 
-  if (!fileId) {
-    console.error('No fileId provided for download');
-    return;
-  }
-
   try {
-    await triggerDownload(sessionId, fileId, filename);
+    if (fileId) {
+      await triggerDownload(sessionId, fileId, filename);
+      return;
+    }
+    await triggerDownloadByFilename(sessionId, filename);
   } catch (error) {
     console.error('Download failed:', error);
     alert(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -84,7 +83,7 @@ export function ArtifactDisplay({ artifact, sessionId }: ArtifactDisplayProps) {
               </div>
             </div>
           </div>
-          {artifact.type === 'file' && artifact.fileId && (
+          {artifact.type === 'file' && artifact.name && (
             <button
               onClick={(e) => handleDownload(e, sessionId, artifact.fileId, artifact.name)}
               className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded hover:bg-primary/90 transition-colors cursor-pointer"

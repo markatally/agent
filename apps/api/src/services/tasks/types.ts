@@ -24,7 +24,7 @@ export type PptStep =
   | 'generating'
   | 'finalizing';
 
-export type PptStepStatus = 'pending' | 'running' | 'completed';
+export type PptStepStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 export interface PptPipelineStep {
   id: PptStep;

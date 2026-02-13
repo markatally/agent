@@ -303,6 +303,13 @@ export const messagesApi = {
     return apiFetch<{ messages: Message[] }>(`/sessions/${sessionId}/messages`);
   },
 
+  async create(sessionId: string, content: string): Promise<Message> {
+    return apiFetch<Message>(`/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  },
+
   async get(id: string): Promise<Message> {
     return apiFetch<Message>(`/messages/${id}`);
   },
@@ -467,6 +474,27 @@ export const filesApi = {
     const token = getAccessToken();
     const response = await fetch(
       `${API_BASE_URL}/sessions/${sessionId}/files/${fileId}/download`,
+      {
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new ApiError('Download failed', response.status);
+    }
+
+    return response.blob();
+  },
+
+  /**
+   * Download a generated file by filename (fallback when file metadata is unavailable)
+   */
+  async downloadByFilename(sessionId: string, filename: string): Promise<Blob> {
+    const token = getAccessToken();
+    const response = await fetch(
+      `${API_BASE_URL}/sessions/${sessionId}/files/by-name/${encodeURIComponent(filename)}/download`,
       {
         headers: {
           ...(token ? { 'Authorization': `Bearer ${token}` } : {}),

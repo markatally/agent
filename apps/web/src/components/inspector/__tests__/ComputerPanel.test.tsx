@@ -16,6 +16,8 @@ describe('ComputerPanel', () => {
     useChatStore.setState({
       isStreaming: false,
       streamingSessionId: null,
+      selectedMessageId: null,
+      messages: new Map(),
       terminalLines: new Map(),
       executionSteps: new Map(),
       sandboxFiles: new Map(),
@@ -36,8 +38,22 @@ describe('ComputerPanel', () => {
     expect(screen.queryByText('Browser view is off')).not.toBeInTheDocument();
   });
 
-  it('shows replay placeholder (not browser-off) for historical timeline steps without snapshots', () => {
+  it('shows synthesized replay snapshot (not browser-off) for historical timeline steps without snapshots', () => {
     useChatStore.setState({
+      messages: new Map([
+        [
+          'session-history',
+          [
+            {
+              id: 'msg-history',
+              sessionId: 'session-history',
+              role: 'assistant',
+              content: 'history',
+              createdAt: new Date(),
+            },
+          ],
+        ],
+      ]),
       browserSession: new Map([
         [
           'session-history',
@@ -59,6 +75,7 @@ describe('ComputerPanel', () => {
             steps: [
               {
                 stepIndex: 0,
+                messageId: 'msg-history',
                 type: 'browse',
                 output: 'Visit page',
                 snapshot: {
@@ -78,7 +95,7 @@ describe('ComputerPanel', () => {
 
     render(<ComputerPanel sessionId="session-history" compact />);
 
-    expect(screen.getByText(/Snapshot unavailable for this step/i)).toBeInTheDocument();
+    expect(screen.getByTestId('browser-viewport-screenshot')).toBeInTheDocument();
     expect(screen.queryByText('Browser view is off')).not.toBeInTheDocument();
   });
 
@@ -192,6 +209,20 @@ describe('ComputerPanel', () => {
       encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>only-one</text></svg>');
 
     useChatStore.setState({
+      messages: new Map([
+        [
+          'session-history',
+          [
+            {
+              id: 'msg-history',
+              sessionId: 'session-history',
+              role: 'assistant',
+              content: 'history',
+              createdAt: new Date(),
+            },
+          ],
+        ],
+      ]),
       browserSession: new Map([
         [
           'session-history',
@@ -221,6 +252,7 @@ describe('ComputerPanel', () => {
             steps: [
               {
                 stepIndex: 0,
+                messageId: 'msg-history',
                 type: 'browse',
                 output: 'First',
                 snapshot: {
@@ -233,6 +265,7 @@ describe('ComputerPanel', () => {
               },
               {
                 stepIndex: 1,
+                messageId: 'msg-history',
                 type: 'browse',
                 output: 'Second',
                 snapshot: {
@@ -250,8 +283,9 @@ describe('ComputerPanel', () => {
 
     render(<ComputerPanel sessionId="session-history" compact />);
 
-    expect(screen.getByText(/Snapshot unavailable for this step/i)).toBeInTheDocument();
-    expect(screen.queryByTestId('browser-viewport-screenshot')).not.toBeInTheDocument();
+    const screenshot = screen.getByTestId('browser-viewport-screenshot');
+    expect(screenshot).toBeInTheDocument();
+    expect(screenshot).not.toHaveAttribute('src', shot);
   });
 
   it('uses url-matched browser action screenshot when timeline step screenshot is missing', () => {
@@ -401,6 +435,20 @@ describe('ComputerPanel', () => {
       encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text>visit</text></svg>');
 
     useChatStore.setState({
+      messages: new Map([
+        [
+          'session-finished',
+          [
+            {
+              id: 'msg-finished',
+              sessionId: 'session-finished',
+              role: 'assistant',
+              content: 'done',
+              createdAt: new Date(),
+            },
+          ],
+        ],
+      ]),
       browserSession: new Map([
         [
           'session-finished',
@@ -422,6 +470,7 @@ describe('ComputerPanel', () => {
             steps: [
               {
                 stepIndex: 0,
+                messageId: 'msg-finished',
                 type: 'browse',
                 output: 'Visit page',
                 snapshot: {
@@ -434,6 +483,7 @@ describe('ComputerPanel', () => {
               },
               {
                 stepIndex: 1,
+                messageId: 'msg-finished',
                 type: 'finalize',
                 output: 'Completed',
                 snapshot: {

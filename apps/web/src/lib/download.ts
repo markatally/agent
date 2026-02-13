@@ -20,19 +20,35 @@ export async function triggerDownload(
 ): Promise<void> {
   try {
     const blob = await filesApi.download(sessionId, fileId);
-    const blobUrl = URL.createObjectURL(blob);
-
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = filename;
-    link.style.display = 'none';
-
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(blobUrl);
+    downloadBlob(blob, filename);
   } catch (error) {
     console.error('Download failed:', error);
     throw error;
   }
+}
+
+export async function triggerDownloadByFilename(
+  sessionId: string,
+  filename: string
+): Promise<void> {
+  try {
+    const blob = await filesApi.downloadByFilename(sessionId, filename);
+    downloadBlob(blob, filename);
+  } catch (error) {
+    console.error('Download by filename failed:', error);
+    throw error;
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  link.style.display = 'none';
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(blobUrl);
 }

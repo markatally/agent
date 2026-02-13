@@ -678,7 +678,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const newFiles = new Map(state.files);
       const sessionFiles = newFiles.get(sessionId) || [];
-      newFiles.set(sessionId, [...sessionFiles, artifact]);
+      const exists = sessionFiles.some((existing) => {
+        if (artifact.fileId && existing.fileId) {
+          return existing.fileId === artifact.fileId;
+        }
+        return (
+          existing.name === artifact.name &&
+          existing.mimeType === artifact.mimeType &&
+          existing.size === artifact.size
+        );
+      });
+      if (!exists) {
+        newFiles.set(sessionId, [...sessionFiles, artifact]);
+      }
       return { files: newFiles };
     });
   },
