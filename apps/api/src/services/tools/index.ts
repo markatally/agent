@@ -8,3 +8,6 @@ export * from './bash_executor';
 export * from './ppt_generator';
 export * from './paper_search';
 export * from './web_search';
+export * from './video_probe';
+export * from './video_download';
+export * from './video_transcript';

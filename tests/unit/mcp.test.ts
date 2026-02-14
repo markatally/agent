@@ -155,6 +155,9 @@ describe('Phase 6.3: MCP Client Integration', () => {
       expect(isMCPTool('file_reader')).toBe(false);
       expect(isMCPTool('file_writer')).toBe(false);
       expect(isMCPTool('bash_executor')).toBe(false);
+      expect(isMCPTool('video_probe')).toBe(false);
+      expect(isMCPTool('video_download')).toBe(false);
+      expect(isMCPTool('video_transcript')).toBe(false);
     });
 
     it('should parse MCP tool names correctly', () => {

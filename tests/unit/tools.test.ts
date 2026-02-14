@@ -61,6 +61,9 @@ describe('Phase 4: Tool System', () => {
       expect(toolNames).toContain('file_reader');
       expect(toolNames).toContain('file_writer');
       expect(toolNames).toContain('bash_executor');
+      expect(toolNames).toContain('video_probe');
+      expect(toolNames).toContain('video_download');
+      expect(toolNames).toContain('video_transcript');
     });
 
     it('should get tool by name', () => {

@@ -81,7 +81,7 @@ describe('InspectorPanel structure', () => {
     render(<InspectorPanel open sessionId="session-1" />);
 
     expect(screen.queryByText('Live')).not.toBeInTheDocument();
-    expect(screen.getByText('Idle')).toBeInTheDocument();
+    expect(screen.getAllByText('Idle').length).toBeGreaterThan(0);
   });
 
   it('shows Completed status after computer activity ends', () => {

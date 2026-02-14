@@ -122,16 +122,34 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const associateAgentStepsWithMessage = useChatStore((state) => state.associateAgentStepsWithMessage);
   const clearFiles = useChatStore((state) => state.clearFiles);
   const loadComputerStateFromStorage = useChatStore((state) => state.loadComputerStateFromStorage);
+  const resetForSession = useChatStore((state) => state.resetForSession);
 
-  // Clear tool calls, tables, file artifacts, and message selection when session changes.
-  // Rehydrate Computer tab state (browser/PPT) from localStorage so it survives refresh.
+  // Comprehensive session-switch cleanup: abort stale streams, reset all session-scoped state,
+  // rehydrate Computer tab from localStorage for the new session, and reset refs.
   useEffect(() => {
-    clearToolCalls(sessionId);
-    clearTables();
-    clearFiles(sessionId);
-    setSelectedMessageId(null);
+    // Stop streaming if it belongs to a DIFFERENT session
+    const state = useChatStore.getState();
+    if (state.isStreaming && state.streamingSessionId && state.streamingSessionId !== sessionId) {
+      abortControllerRef.current?.abort();
+      stopStreaming();
+    }
+
+    // Full session-scoped state reset
+    resetForSession(sessionId);
+
+    // Rehydrate Computer tab from localStorage for the NEW session
     loadComputerStateFromStorage(sessionId);
-  }, [sessionId, clearToolCalls, clearTables, clearFiles, setSelectedMessageId, loadComputerStateFromStorage]);
+
+    // Force refetch messages for the session we're switching TO.
+    // Without this, stale cached data (staleTime: 30s) may be missing messages
+    // that were persisted while we were viewing another session (e.g. if we switched
+    // away mid-stream and message.complete never fired to invalidate the cache).
+    queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'messages'] });
+
+    // Reset refs
+    initialMessageHandledRef.current = false;
+    pipelineStageStepIndexRef.current.clear();
+  }, [sessionId]);
 
   useEffect(() => {
     return () => {
@@ -240,9 +258,9 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
           if (!state.agentRunStartIndex.has(sessionId)) {
             setAgentRunStartIndex(sessionId);
           }
-          if ((state.reasoningSteps.get(sessionId)?.length ?? 0) === 0) {
-            clearReasoningSteps(sessionId);
-          }
+          // Always clear reasoning steps on a new agent turn so the UI starts
+          // fresh with "Step 1" rather than showing stale steps from the prior turn.
+          clearReasoningSteps(sessionId);
         }
         pipelineStageStepIndexRef.current.clear();
         break;
@@ -837,7 +855,10 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
     }
   };
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (
+    content: string,
+    options?: { initializeRunUi?: boolean }
+  ) => {
     // Guard: Do not allow sending if session is invalid
     if (!isSessionValid) {
       toast({
@@ -848,14 +869,15 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       return;
     }
 
-    // UI-first run initialization: mount inspector + live trace/timeline at submit time (T=0),
-    // before backend emits message.start/tool events.
-    setInspectorTab('computer');
-    setInspectorOpen(true);
-    startStreaming(sessionId);
-    setAgentRunStartIndex(sessionId);
-    clearReasoningSteps(sessionId);
-    pipelineStageStepIndexRef.current.clear();
+    if (options?.initializeRunUi) {
+      // New chat start only: mount inspector + live trace/timeline at submit time (T=0).
+      setInspectorTab('computer');
+      setInspectorOpen(true);
+      startStreaming(sessionId);
+      setAgentRunStartIndex(sessionId);
+      clearReasoningSteps(sessionId);
+      pipelineStageStepIndexRef.current.clear();
+    }
 
     setIsSending(true);
     abortControllerRef.current?.abort();
@@ -928,23 +950,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       // User can see their message and the thinking indicator while we stream
       setIsSending(false);
 
-      const lowerContent = content.toLowerCase();
-      const looksLikePpt = ['ppt', 'presentation', 'powerpoint', 'slides'].some(
-        (keyword) => lowerContent.includes(keyword)
-      );
-      if (looksLikePpt) {
-        startPptPipeline(sessionId, [
-          { id: 'research', label: 'Research', status: 'pending' },
-          { id: 'browsing', label: 'Browsing', status: 'pending' },
-          { id: 'reading', label: 'Reading', status: 'pending' },
-          { id: 'synthesizing', label: 'Synthesizing', status: 'pending' },
-          { id: 'generating', label: 'Generating files', status: 'pending' },
-          { id: 'finalizing', label: 'Finalizing', status: 'pending' },
-        ]);
-        setInspectorTab('computer');
-        setInspectorOpen(true);
-      }
-
+      // PPT pipeline is started by the server via ppt.pipeline.start event, not speculatively.
       // Single request SSE flow: backend persists user message and streams assistant events.
       for await (const event of apiClient.chat.sendAndStream(
         sessionId,
@@ -981,7 +987,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
     if (isStreaming || isSending) return;
 
     initialMessageHandledRef.current = true;
-    handleSendMessage(initialMessage);
+    handleSendMessage(initialMessage, { initializeRunUi: true });
     navigate(location.pathname, { replace: true, state: null });
   }, [
     initialMessage,

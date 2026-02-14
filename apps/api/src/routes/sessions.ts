@@ -125,7 +125,13 @@ sessions.get('/:id', async (c) => {
     orderBy: { createdAt: 'asc' },
   });
 
-  return c.json({ ...session, toolCalls });
+  // Check if there are in-progress tool calls (no messageId = agent turn still running)
+  const pendingToolCallCount = await prisma.toolCall.count({
+    where: { sessionId, messageId: null },
+  });
+  const taskRunning = pendingToolCallCount > 0;
+
+  return c.json({ ...session, toolCalls, taskRunning });
 });
 
 /**

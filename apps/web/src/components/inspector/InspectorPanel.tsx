@@ -128,7 +128,9 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
     ? 'Running'
     : hasFailedToolCall
       ? 'Failed'
-      : 'Completed';
+      : reasoningSteps.length > 0
+        ? 'Completed'
+        : 'Idle';
 
   return (
     <aside
@@ -225,7 +227,8 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
                           'h-2 w-2 rounded-full',
                           reasoningStatusLabel === 'Running' && 'bg-blue-500',
                           reasoningStatusLabel === 'Completed' && 'bg-emerald-500',
-                          reasoningStatusLabel === 'Failed' && 'bg-destructive'
+                          reasoningStatusLabel === 'Failed' && 'bg-destructive',
+                          reasoningStatusLabel === 'Idle' && 'bg-muted-foreground/50'
                         )}
                       />
                       {reasoningStatusLabel}

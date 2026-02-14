@@ -17,6 +17,23 @@ type PersistedToolCall = {
   message_id?: string;
 };
 
+type PersistedComputerStep = {
+  stepIndex?: number;
+  messageId?: string;
+  type?: AgentStep['type'];
+  output?: string;
+  snapshot?: {
+    stepIndex?: number;
+    timestamp?: number;
+    url?: string;
+    screenshot?: string;
+    metadata?: {
+      actionDescription?: string;
+      domSummary?: string;
+    };
+  };
+};
+
 function normalizeUrl(raw: string): string {
   try {
     const parsed = new URL(raw);
@@ -48,6 +65,45 @@ function normalizeUrl(raw: string): string {
 function extractUrls(text: string): string[] {
   const matches = text.match(/https?:\/\/[^\s)]+/g) || [];
   return matches.map((url) => normalizeUrl(url.replace(/[),.]+$/, '')));
+}
+
+export function extractPersistedAgentStepsFromMessages(
+  messages: Array<{ id: string; role: string; metadata?: Record<string, unknown> | null }>
+): AgentStep[] {
+  const steps: AgentStep[] = [];
+
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    const maybeSteps = (message.metadata as any)?.computerTimelineSteps;
+    if (!Array.isArray(maybeSteps)) continue;
+
+    for (const rawStep of maybeSteps as PersistedComputerStep[]) {
+      if (!rawStep || typeof rawStep !== 'object') continue;
+      const type = rawStep.type;
+      if (type !== 'browse' && type !== 'search' && type !== 'tool' && type !== 'finalize') continue;
+      const snapshot = rawStep.snapshot && typeof rawStep.snapshot === 'object'
+        ? {
+            stepIndex: steps.length,
+            timestamp:
+              typeof rawStep.snapshot.timestamp === 'number' && Number.isFinite(rawStep.snapshot.timestamp)
+                ? rawStep.snapshot.timestamp
+                : Date.now(),
+            url: rawStep.snapshot.url,
+            screenshot: rawStep.snapshot.screenshot,
+            metadata: rawStep.snapshot.metadata,
+          }
+        : undefined;
+      steps.push({
+        stepIndex: steps.length,
+        messageId: rawStep.messageId ?? message.id,
+        type,
+        output: rawStep.output,
+        snapshot,
+      });
+    }
+  }
+
+  return steps;
 }
 
 export function reconstructAgentStepsFromToolCalls(toolCalls: PersistedToolCall[]): AgentStep[] {
@@ -151,18 +207,31 @@ export function useSessionMessages(sessionId: string | undefined) {
   const appendAgentStep = useChatStore((state) => state.appendAgentStep);
   const clearAgentSteps = useChatStore((state) => state.clearAgentSteps);
   const updateAgentStepAt = useChatStore((state) => state.updateAgentStepAt);
+  const updateAgentStepSnapshotAt = useChatStore((state) => state.updateAgentStepSnapshotAt);
+  const loadComputerStateFromStorage = useChatStore((state) => state.loadComputerStateFromStorage);
   const addReasoningStep = useChatStore((state) => state.addReasoningStep);
   const clearReasoningSteps = useChatStore((state) => state.clearReasoningSteps);
+  const startStreaming = useChatStore((state) => state.startStreaming);
 
   return useQuery({
     queryKey: ['sessions', sessionId, 'messages'],
     queryFn: async () => {
       if (!sessionId) throw new Error('Session ID is required');
+
+      // Refresh-order guard:
+      // Load session-scoped persisted Computer timeline before API hydration so we never
+      // clobber richer local snapshot history with reconstructed fallback.
+      const currentTimeline = useChatStore.getState().agentSteps.get(sessionId);
+      if ((currentTimeline?.steps?.length ?? 0) === 0) {
+        loadComputerStateFromStorage(sessionId);
+      }
+
       const session = await apiClient.sessions.get(sessionId);
 
       // Update chat store with messages (ensure each message has current sessionId for file lookups)
       const messages = (session.messages || []).map((m) => ({ ...m, sessionId }));
       setMessages(sessionId, messages);
+      const persistedAgentSteps = extractPersistedAgentStepsFromMessages(messages as any);
 
       // Hydrate persisted tool calls into the store (for refresh/load).
       // Prefer atomic upsert so we don't depend on call ordering across effects/refetches.
@@ -226,10 +295,47 @@ export function useSessionMessages(sessionId: string | undefined) {
         const existingSteps = existingTimeline?.steps ?? [];
         if (existingSteps.length === 0) {
           clearAgentSteps(sessionId);
-          for (const step of reconstructedSteps) {
+          // Deduplicate steps by (type, output, snapshot.url) signature before populating
+          const dedupSignature = (step: AgentStep) =>
+            [step.type, step.output ?? '', step.snapshot?.url ?? ''].join('|');
+          const seen = new Set<string>();
+          const sourceSteps = persistedAgentSteps.length > 0 ? persistedAgentSteps : reconstructedSteps;
+          for (const step of sourceSteps) {
+            const sig = dedupSignature(step);
+            if (seen.has(sig)) continue;
+            seen.add(sig);
             appendAgentStep(sessionId, step);
           }
-        } else if (reconstructedSteps.length > 0) {
+        } else if (persistedAgentSteps.length > 0 || reconstructedSteps.length > 0) {
+          // Backfill missing screenshots from persisted timeline without replacing existing local state.
+          if (persistedAgentSteps.length > 0) {
+            const screenshotBySignature = new Map<string, string>();
+            const signatureForStep = (step: AgentStep) =>
+              [
+                step.type,
+                step.output ?? '',
+                step.snapshot?.url ?? '',
+                step.snapshot?.metadata?.actionDescription ?? '',
+              ].join('|');
+
+            for (const persisted of persistedAgentSteps) {
+              const shot = persisted.snapshot?.screenshot;
+              if (!shot) continue;
+              const signature = signatureForStep(persisted);
+              if (!screenshotBySignature.has(signature)) {
+                screenshotBySignature.set(signature, shot);
+              }
+            }
+
+            existingSteps.forEach((existingStep, index) => {
+              if (existingStep.snapshot?.screenshot) return;
+              const signature = signatureForStep(existingStep);
+              const recovered = screenshotBySignature.get(signature);
+              if (!recovered) return;
+              updateAgentStepSnapshotAt(sessionId, index, { screenshot: recovered });
+            });
+          }
+
           // Reconcile messageId on existing steps using reconstructed signatures.
           // This keeps historical scoping stable and repairs prior mis-associations
           // without replacing snapshots.
@@ -274,8 +380,8 @@ export function useSessionMessages(sessionId: string | undefined) {
       // Hydrate reasoning steps from message metadata
       // Use a message-specific key format: `msg-{messageId}`
       for (const message of messages) {
-        if (message.role === 'assistant' && message.metadata?.reasoningSteps) {
-          const reasoningSteps = message.metadata.reasoningSteps as Array<{
+        if (message.role === 'assistant' && (message.metadata as any)?.reasoningSteps) {
+          const reasoningSteps = (message.metadata as any).reasoningSteps as Array<{
             stepId: string;
             label: string;
             startedAt: number;
@@ -321,6 +427,12 @@ export function useSessionMessages(sessionId: string | undefined) {
         setFileArtifacts(sessionId, artifacts);
       } catch {
         // Ignore - session may have no files or list may fail
+      }
+
+      // If the backend indicates an agent turn is still running, resume streaming state
+      // so the UI shows a "reconnecting" indicator and SSE auto-reconnect can pick up.
+      if ((session as any).taskRunning) {
+        startStreaming(sessionId);
       }
 
       return messages;

@@ -85,6 +85,245 @@ interface StreamEvent {
   data: any;
 }
 
+type PersistedComputerStep = {
+  stepIndex: number;
+  type: 'browse' | 'search' | 'tool' | 'finalize';
+  output?: string;
+  snapshot?: {
+    stepIndex: number;
+    timestamp: number;
+    url?: string;
+    screenshot?: string;
+    metadata?: {
+      actionDescription?: string;
+      domSummary?: string;
+    };
+  };
+};
+
+function normalizeComputerUrl(raw: string | undefined | null): string {
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    const keys = Array.from(parsed.searchParams.keys());
+    for (const key of keys) {
+      if (
+        /^utm_/i.test(key) ||
+        /^ga_/i.test(key) ||
+        /^gaa_/i.test(key) ||
+        /^gclid$/i.test(key) ||
+        /^fbclid$/i.test(key) ||
+        /^mc_eid$/i.test(key) ||
+        /^mc_cid$/i.test(key) ||
+        /^ref$/i.test(key) ||
+        /^ref_src$/i.test(key) ||
+        /^igshid$/i.test(key) ||
+        /^mkt_tok$/i.test(key) ||
+        /^__cf_chl_/i.test(key)
+      ) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+class ComputerTimelineCollector {
+  private steps: PersistedComputerStep[] = [];
+  private browserActionStepIndices: number[] = [];
+  private visitStepIndices: number[] = [];
+
+  private appendStep(
+    step: Omit<PersistedComputerStep, 'stepIndex' | 'snapshot'> & {
+      snapshot?: Omit<NonNullable<PersistedComputerStep['snapshot']>, 'stepIndex'>;
+    }
+  ) {
+    const stepIndex = this.steps.length;
+    this.steps.push({
+      ...step,
+      stepIndex,
+      snapshot: step.snapshot ? { ...step.snapshot, stepIndex } : undefined,
+    });
+    return stepIndex;
+  }
+
+  captureSsePayload(rawPayload: unknown) {
+    if (typeof rawPayload !== 'string') return;
+    let parsed: { type?: string; timestamp?: number; data?: any } | null = null;
+    try {
+      parsed = JSON.parse(rawPayload) as StreamEvent;
+    } catch {
+      return;
+    }
+    if (!parsed || typeof parsed.type !== 'string') return;
+    const event = parsed;
+    const data = event.data ?? {};
+    const timestamp = typeof event.timestamp === 'number' ? event.timestamp : Date.now();
+
+    if (event.type === 'browse.activity') {
+      const action = data?.action as 'search' | 'visit' | 'read' | undefined;
+      if (!action) return;
+      const stepIndex = this.appendStep({
+        type: action === 'search' ? 'search' : 'browse',
+        output:
+          action === 'search'
+            ? data?.query || 'Search'
+            : data?.title || data?.url || action,
+        snapshot: {
+          timestamp: typeof data?.timestamp === 'number' ? data.timestamp : timestamp,
+          url: normalizeComputerUrl(data?.url),
+          metadata: {
+            actionDescription:
+              action === 'search'
+                ? `Search: ${data?.query || ''}`.trim()
+                : action === 'visit'
+                  ? 'Visit page'
+                  : 'Read page',
+          },
+        },
+      });
+      if (action === 'visit') this.visitStepIndices.push(stepIndex);
+      return;
+    }
+
+    if (event.type === 'browse.screenshot') {
+      const visitIndex =
+        typeof data?.visitIndex === 'number' && data.visitIndex >= 0
+          ? data.visitIndex
+          : -1;
+      const targetStepIndex = this.visitStepIndices[visitIndex];
+      const screenshot = typeof data?.screenshot === 'string' ? data.screenshot : '';
+      if (targetStepIndex == null || !screenshot) return;
+      const target = this.steps[targetStepIndex];
+      if (!target) return;
+      target.snapshot = {
+        ...(target.snapshot ?? { stepIndex: targetStepIndex, timestamp }),
+        screenshot: `data:image/jpeg;base64,${screenshot}`,
+        stepIndex: targetStepIndex,
+      };
+      return;
+    }
+
+    if (event.type === 'browser.action') {
+      const actionName = typeof data?.action === 'string' ? data.action : '';
+      if (!actionName) return;
+      const actionType = actionName.replace('browser_', '');
+      const url = normalizeComputerUrl(
+        data?.loadedUrl || data?.normalizedUrl || data?.params?.url
+      );
+      const stepIndex = this.appendStep({
+        type: 'browse',
+        output: data?.output || data?.error || actionName,
+        snapshot: {
+          timestamp,
+          url,
+          metadata: {
+            actionDescription: `Browser action: ${actionType}`,
+            domSummary: data?.output,
+          },
+        },
+      });
+      this.browserActionStepIndices.push(stepIndex);
+      return;
+    }
+
+    if (event.type === 'browser.screenshot') {
+      const screenshot = typeof data?.screenshot === 'string' ? data.screenshot : '';
+      if (!screenshot || this.browserActionStepIndices.length === 0) return;
+      const actionIndex =
+        typeof data?.actionIndex === 'number' && data.actionIndex >= 0
+          ? data.actionIndex
+          : this.browserActionStepIndices.length - 1;
+      const resolvedActionIndex = Math.min(
+        actionIndex,
+        this.browserActionStepIndices.length - 1
+      );
+      const targetStepIndex = this.browserActionStepIndices[resolvedActionIndex];
+      const target = this.steps[targetStepIndex];
+      if (!target) return;
+      target.snapshot = {
+        ...(target.snapshot ?? { stepIndex: targetStepIndex, timestamp }),
+        screenshot: `data:image/jpeg;base64,${screenshot}`,
+        stepIndex: targetStepIndex,
+      };
+      return;
+    }
+
+    if (event.type === 'browser.closed') {
+      this.appendStep({
+        type: 'finalize',
+        output: 'Browser session closed',
+        snapshot: {
+          timestamp,
+          metadata: { actionDescription: 'Browser closed' },
+        },
+      });
+      return;
+    }
+
+    if (event.type === 'tool.complete') {
+      const toolName = typeof data?.toolName === 'string' ? data.toolName : '';
+      if (toolName !== 'web_search') return;
+      // Match frontend behavior: when browser actions exist, avoid synthetic search-result cards.
+      if (this.browserActionStepIndices.length > 0) return;
+
+      const artifacts = Array.isArray(data?.artifacts) ? data.artifacts : [];
+      const searchArtifact = artifacts.find(
+        (artifact: any) => artifact?.name === 'search-results.json'
+      );
+      if (!searchArtifact || searchArtifact.content == null) return;
+
+      try {
+        const raw =
+          typeof searchArtifact.content === 'string'
+            ? searchArtifact.content
+            : JSON.stringify(searchArtifact.content);
+        const parsed = JSON.parse(raw) as {
+          results?: Array<{ title?: string; url?: string; content?: string }>;
+        };
+        const results = Array.isArray(parsed.results) ? parsed.results : [];
+        for (const result of results) {
+          const url = normalizeComputerUrl(result?.url);
+          if (!url) continue;
+          this.appendStep({
+            type: 'browse',
+            output: result?.title || url,
+            snapshot: {
+              timestamp,
+              url,
+              metadata: {
+                actionDescription: 'Visit page',
+                ...(result?.content ? { domSummary: result.content } : {}),
+              },
+            },
+          });
+        }
+      } catch {
+        // Ignore malformed artifact payloads.
+      }
+    }
+  }
+
+  getSteps(): PersistedComputerStep[] {
+    return this.steps;
+  }
+}
+
+function createTimelineCapturingStream(
+  baseStream: { writeSSE: (payload: { data: string }) => Promise<void> },
+  collector: ComputerTimelineCollector
+) {
+  return {
+    ...baseStream,
+    writeSSE: async (payload: { data: string }) => {
+      collector.captureSsePayload(payload?.data);
+      await baseStream.writeSSE(payload);
+    },
+  };
+}
+
 const inferFocusTab = (
   goal: { requiresPPT?: boolean; requiresSearch?: boolean } | null,
   executionMode: ExecutionMode
@@ -837,11 +1076,11 @@ The user has enabled ONLY these skills:
 ${skillDescriptionsGet}
 
 IMPORTANT RULES:
-1. When the user asks "what can you do", "what skills do you have", or similar questions about your capabilities, you MUST list ONLY the skills shown above.
-2. Do NOT mention internal tools (like file_reader, file_writer, bash_executor, web_search, paper_search, ppt_generator, etc.) - these are internal implementation details.
+1. When the user asks "what can you do", "what skills do you have", or similar questions, list the enabled skills above first, then optionally describe built-in capability categories without exposing internal implementation details.
+2. Do NOT mention internal tools (like file_reader, file_writer, bash_executor, web_search, paper_search, ppt_generator, etc.) unless the user explicitly asks for tool names.
 3. Do NOT make up or invent capabilities beyond the enabled skills listed above.
 4. Do NOT list generic AI capabilities like "programming", "data analysis", "writing", etc. unless they are explicitly in the enabled skills list.
-5. If a skill is not in the list above, you do NOT have that capability.`;
+5. The skills list controls specialized/domain skill claims. You may still use enabled built-in tools to complete concrete user tasks when appropriate.`;
   } else {
     systemPromptContentGet += `
 
@@ -852,9 +1091,16 @@ The user has not enabled any skills.
 IMPORTANT RULES:
 1. When the user asks "what can you do" or similar, explain that you are a general AI assistant but no specialized skills are currently enabled.
 2. Suggest they enable skills in the Skills settings (gear icon) to unlock specialized capabilities.
-3. Do NOT mention internal tools or make up capabilities.
-4. Do NOT list generic AI capabilities - you have no specialized skills enabled.`;
+3. Do NOT mention internal tool names unless the user explicitly asks for tool names.
+4. Do NOT make up capabilities; only claim tasks you can handle with available built-in tools.`;
   }
+
+  systemPromptContentGet += `
+
+DEPENDENCY RECOVERY RULES:
+1. If a tool fails because yt-dlp is missing and bash_executor is available, run a safe user-level install command and retry once.
+2. Prefer: python3 -m pip install --user yt-dlp
+3. Do NOT claim you cannot install dependencies without attempting recovery first.`;
 
   // Always use fresh system prompt with current skill list (skills may change mid-conversation)
   const sysIdx = llmMessages.findIndex((m) => m.role === 'system');
@@ -905,14 +1151,16 @@ IMPORTANT RULES:
         ? new PptPipelineController(sessionId, sseStream.writeSSE.bind(sseStream))
         : null;
     const activeStream = pipelineController ? pipelineController.wrapStream(sseStream) : sseStream;
+    const computerTimelineCollector = new ComputerTimelineCollector();
+    const streamWithCapture = createTimelineCapturingStream(activeStream, computerTimelineCollector);
     const toolExecutor =
-      getBrowserManager().isEnabled() && activeStream
-        ? wrapExecutorWithBrowserEvents({ sessionId, toolExecutor: baseToolExecutor, sseStream: activeStream })
+      getBrowserManager().isEnabled() && streamWithCapture
+        ? wrapExecutorWithBrowserEvents({ sessionId, toolExecutor: baseToolExecutor, sseStream: streamWithCapture })
         : baseToolExecutor;
 
     try {
       // Send message.start event
-      await activeStream.writeSSE({
+      await streamWithCapture.writeSSE({
         data: JSON.stringify({
           type: 'message.start',
           sessionId,
@@ -922,7 +1170,7 @@ IMPORTANT RULES:
       });
 
       const focus = inferFocusTab(taskState?.goal || null, executionMode);
-      await activeStream.writeSSE({
+      await streamWithCapture.writeSSE({
         data: JSON.stringify({
           type: 'inspector.focus',
           sessionId,
@@ -957,7 +1205,7 @@ IMPORTANT RULES:
       if (executionMode === 'sandbox') {
         const sandboxManager = getSandboxManager();
         if (!sandboxManager.isEnabled()) {
-          await activeStream.writeSSE({
+          await streamWithCapture.writeSSE({
             data: JSON.stringify({
               type: 'sandbox.fallback',
               sessionId,
@@ -974,7 +1222,7 @@ IMPORTANT RULES:
             prisma,
             llmClient,
             toolExecutor,
-            activeStream,
+            streamWithCapture,
             startTime
           );
         } else {
@@ -990,11 +1238,11 @@ IMPORTANT RULES:
               llmClient,
               startTime,
               toolExecutor,
-              sseStream: activeStream,
+              sseStream: streamWithCapture,
               processAgentTurn,
             });
           } catch (error: any) {
-            await activeStream.writeSSE({
+            await streamWithCapture.writeSSE({
               data: JSON.stringify({
                 type: 'sandbox.fallback',
                 sessionId,
@@ -1011,7 +1259,7 @@ IMPORTANT RULES:
               prisma,
               llmClient,
               toolExecutor,
-              activeStream,
+              streamWithCapture,
               startTime
             );
           }
@@ -1026,7 +1274,7 @@ IMPORTANT RULES:
           prisma,
           llmClient,
           toolExecutor,
-          activeStream,
+          streamWithCapture,
           startTime
         );
       }
@@ -1034,6 +1282,7 @@ IMPORTANT RULES:
       // Save final assistant message to database
       let assistantMessage: { id: string } | null = null;
       try {
+        const persistedComputerTimeline = computerTimelineCollector.getSteps();
         assistantMessage = await prisma.message.create({
           data: {
             sessionId,
@@ -1044,6 +1293,9 @@ IMPORTANT RULES:
               model: llmClient.getModel(),
               stepsTaken: result.stepsTaken,
               reasoningSteps: result.reasoningSteps,
+              ...(persistedComputerTimeline.length > 0
+                ? { computerTimelineSteps: persistedComputerTimeline }
+                : {}),
             },
           },
         });
@@ -1066,7 +1318,7 @@ IMPORTANT RULES:
       }
 
       // Signal stream completion to frontend so it can finalize UI state.
-      await activeStream.writeSSE({
+      await streamWithCapture.writeSSE({
         data: JSON.stringify({
           type: 'message.complete',
           sessionId,
@@ -1082,7 +1334,7 @@ IMPORTANT RULES:
       console.error('Stream error:', error);
 
       // Send error event
-      await activeStream.writeSSE({
+      await streamWithCapture.writeSSE({
         data: JSON.stringify({
           type: 'error',
           sessionId,
@@ -1282,11 +1534,11 @@ The user has enabled ONLY these skills:
 ${skillDescriptions}
 
 IMPORTANT RULES:
-1. When the user asks "what can you do", "what skills do you have", or similar questions about your capabilities, you MUST list ONLY the skills shown above.
-2. Do NOT mention internal tools (like file_reader, file_writer, bash_executor, web_search, paper_search, ppt_generator, etc.) - these are internal implementation details.
+1. When the user asks "what can you do", "what skills do you have", or similar questions, list the enabled skills above first, then optionally describe built-in capability categories without exposing internal implementation details.
+2. Do NOT mention internal tools (like file_reader, file_writer, bash_executor, web_search, paper_search, ppt_generator, etc.) unless the user explicitly asks for tool names.
 3. Do NOT make up or invent capabilities beyond the enabled skills listed above.
 4. Do NOT list generic AI capabilities like "programming", "data analysis", "writing", etc. unless they are explicitly in the enabled skills list.
-5. If a skill is not in the list above, you do NOT have that capability.`;
+5. The skills list controls specialized/domain skill claims. You may still use enabled built-in tools to complete concrete user tasks when appropriate.`;
   } else {
     systemPromptContent += `
 
@@ -1297,9 +1549,16 @@ The user has not enabled any skills.
 IMPORTANT RULES:
 1. When the user asks "what can you do" or similar, explain that you are a general AI assistant but no specialized skills are currently enabled.
 2. Suggest they enable skills in the Skills settings (gear icon) to unlock specialized capabilities.
-3. Do NOT mention internal tools or make up capabilities.
-4. Do NOT list generic AI capabilities - you have no specialized skills enabled.`;
+3. Do NOT mention internal tool names unless the user explicitly asks for tool names.
+4. Do NOT make up capabilities; only claim tasks you can handle with available built-in tools.`;
   }
+
+  systemPromptContent += `
+
+DEPENDENCY RECOVERY RULES:
+1. If a tool fails because yt-dlp is missing and bash_executor is available, run a safe user-level install command and retry once.
+2. Prefer: python3 -m pip install --user yt-dlp
+3. Do NOT claim you cannot install dependencies without attempting recovery first.`;
   
   // Only add to llmMessages if not using a skill invocation (skill invocation sets its own prompt)
   if (!skillInvocation) {
@@ -1356,14 +1615,16 @@ IMPORTANT RULES:
         ? new PptPipelineController(sessionId, sseStream.writeSSE.bind(sseStream))
         : null;
     const activeStream = pipelineController ? pipelineController.wrapStream(sseStream) : sseStream;
+    const computerTimelineCollector = new ComputerTimelineCollector();
+    const streamWithCapture = createTimelineCapturingStream(activeStream, computerTimelineCollector);
     const toolExecutor =
-      getBrowserManager().isEnabled() && activeStream
-        ? wrapExecutorWithBrowserEvents({ sessionId, toolExecutor: baseToolExecutor, sseStream: activeStream })
+      getBrowserManager().isEnabled() && streamWithCapture
+        ? wrapExecutorWithBrowserEvents({ sessionId, toolExecutor: baseToolExecutor, sseStream: streamWithCapture })
         : baseToolExecutor;
 
     try {
       // Send message.start event with user message ID
-      await activeStream.writeSSE({
+      await streamWithCapture.writeSSE({
         data: JSON.stringify({
           type: 'message.start',
           sessionId,
@@ -1373,7 +1634,7 @@ IMPORTANT RULES:
       });
 
       const focus = inferFocusTab(taskState?.goal || null, executionMode);
-      await activeStream.writeSSE({
+      await streamWithCapture.writeSSE({
         data: JSON.stringify({
           type: 'inspector.focus',
           sessionId,
@@ -1420,13 +1681,14 @@ IMPORTANT RULES:
         prisma,
         llmClient,
         toolExecutor,
-        activeStream,
+        streamWithCapture,
         startTime
       );
 
       // Save final assistant message to database
       let assistantMessage: { id: string } | null = null;
       try {
+        const persistedComputerTimeline = computerTimelineCollector.getSteps();
         assistantMessage = await prisma.message.create({
           data: {
             sessionId,
@@ -1437,6 +1699,9 @@ IMPORTANT RULES:
               model: llmClient.getModel(),
               stepsTaken: result.stepsTaken,
               reasoningSteps: result.reasoningSteps,
+              ...(persistedComputerTimeline.length > 0
+                ? { computerTimelineSteps: persistedComputerTimeline }
+                : {}),
             },
           },
         });
@@ -1459,7 +1724,7 @@ IMPORTANT RULES:
       }
 
       // Send message.complete event (assistantMessageId null if persistence skipped)
-      await activeStream.writeSSE({
+      await streamWithCapture.writeSSE({
         data: JSON.stringify({
           type: 'message.complete',
           sessionId,
@@ -1475,7 +1740,7 @@ IMPORTANT RULES:
       console.error('Stream error:', error);
 
       // Send error event
-      await activeStream.writeSSE({
+      await streamWithCapture.writeSSE({
         data: JSON.stringify({
           type: 'error',
           sessionId,

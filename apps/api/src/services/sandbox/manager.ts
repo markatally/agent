@@ -94,6 +94,7 @@ export class SandboxManager {
   private docker: Docker;
   private containers: Map<string, ContainerInfo> = new Map();
   private config: SandboxConfig;
+  private unavailableReason: string | null = null;
 
   constructor() {
     const dockerOptions = getDockerSocketOptions();
@@ -114,7 +115,11 @@ export class SandboxManager {
    * Check if sandbox is enabled
    */
   isEnabled(): boolean {
-    return this.config.enabled;
+    return this.config.enabled && this.unavailableReason === null;
+  }
+
+  getUnavailableReason(): string | null {
+    return this.unavailableReason;
   }
 
   /**
@@ -213,7 +218,32 @@ export class SandboxManager {
       return info;
     } catch (error: any) {
       console.error(`Failed to create sandbox for session ${sessionId}:`, error);
+      if (this.shouldDisableSandbox(error)) {
+        this.unavailableReason = this.extractSandboxErrorMessage(error);
+        console.warn(
+          `[Sandbox] Disabling sandbox for this process due to unrecoverable setup error: ${this.unavailableReason}`
+        );
+      }
       throw new Error(`Failed to create sandbox: ${error.message}`);
+    }
+  }
+
+  private shouldDisableSandbox(error: unknown): boolean {
+    const message = this.extractSandboxErrorMessage(error).toLowerCase();
+    return (
+      message.includes('no such image') ||
+      message.includes('cannot connect to the docker daemon') ||
+      message.includes('docker daemon is not running')
+    );
+  }
+
+  private extractSandboxErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
     }
   }
 

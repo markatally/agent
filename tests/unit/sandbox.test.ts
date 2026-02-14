@@ -100,6 +100,27 @@ describe('Phase 6.1: Docker Sandbox', () => {
       const manager = getSandboxManager();
       expect(typeof manager.cleanup).toBe('function');
     });
+
+    it('disables sandbox after unrecoverable image/docker setup errors', async () => {
+      const manager = new SandboxManager() as any;
+      manager.config.enabled = true;
+      manager.docker = {
+        listContainers: async () => [],
+        createContainer: async () => {
+          throw new Error('No such image: mark-sandbox:latest');
+        },
+      };
+
+      await expect(
+        manager.createSandbox({
+          sessionId: 'sandbox-disable-test',
+          workspaceDir: testWorkspace,
+        })
+      ).rejects.toThrow('Failed to create sandbox');
+
+      expect(manager.isEnabled()).toBe(false);
+      expect(manager.getUnavailableReason()).toContain('No such image');
+    });
   });
 
   describe('SandboxExecResult type', () => {

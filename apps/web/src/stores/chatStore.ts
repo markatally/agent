@@ -300,6 +300,10 @@ interface ChatState {
   updateMessage: (sessionId: string, messageId: string, updates: Partial<Message>) => void;
   clearMessages: (sessionId: string) => void;
 
+  // Actions - Session lifecycle
+  resetForSession: (sessionId: string) => void;
+  stopStreamingForSession: (sessionId: string) => void;
+
   // Actions - Streaming
   startStreaming: (sessionId: string) => void;
   appendStreamingContent: (content: string) => void;
@@ -431,6 +435,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
   browserSession: new Map(),
   agentSteps: new Map(),
   agentRunStartIndex: new Map(),
+
+  // Comprehensive session-scoped state reset for session switches
+  resetForSession: (sessionId: string) => {
+    const state = get();
+    // Clear session-scoped transient state
+    state.clearToolCalls(sessionId);
+    state.clearReasoningSteps(sessionId);
+    state.clearFiles(sessionId);
+    state.clearTables();
+    state.clearPptPipeline(sessionId);
+    state.clearBrowserSession(sessionId);
+    state.clearExecutionState(sessionId);
+    state.clearAgentSteps(sessionId);
+    set({ selectedMessageId: null });
+  },
+
+  // Only stop streaming if it belongs to the specified session
+  stopStreamingForSession: (sessionId: string) => {
+    const state = get();
+    if (state.streamingSessionId === sessionId) {
+      set({ streamingSessionId: null, streamingContent: '', isStreaming: false, isThinking: false });
+    }
+  },
 
   // Set messages for a session
   setMessages: (sessionId: string, messages: Message[]) => {
@@ -1071,6 +1098,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const agentSteps = new Map(state.agentSteps);
       const existing = agentSteps.get(sessionId) ?? { steps: [], currentStepIndex: 0 };
+
+      // Dedup guard: skip if the last step has the same (type, output, snapshot.url) signature
+      if (existing.steps.length > 0 && (step.stepIndex === undefined || step.stepIndex >= existing.steps.length)) {
+        const last = existing.steps[existing.steps.length - 1];
+        if (
+          last.type === step.type &&
+          (last.output ?? '') === (step.output ?? '') &&
+          (last.snapshot?.url ?? '') === (step.snapshot?.url ?? '')
+        ) {
+          return { agentSteps };
+        }
+      }
+
       const stepIndex =
         typeof step.stepIndex === 'number' && step.stepIndex >= 0
           ? step.stepIndex
