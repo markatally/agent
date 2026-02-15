@@ -9,7 +9,7 @@
 | Field | Value |
 |-------|-------|
 | **Last Updated** | 2026-02-15 |
-| **Active Phase** | Whisper Audio Transcription Fallback |
+| **Active Phase** | Dark Mode Professional Optimization |
 | **Status** | ✅ Complete |
 | **Blocked By** | None |
 
@@ -33,6 +33,27 @@ The Mark Agent is a **complete full-stack AI agent system** with:
 ---
 
 ## Active Focus
+
+### Phase 11: Dark Mode Professional Optimization ✅ COMPLETE
+
+**Goal:** Optimize dark mode to match Claude's professional design standards — softer backgrounds, proper visual hierarchy, custom scrollbars, better tables.
+
+**Changes (12 files modified):**
+
+1. **CSS Variables** (`index.css`) — Replaced harsh `#0a0a0a` dark bg with professional `#1f1f1f`, softened text to `#ececec`, added custom dark scrollbar styling, dark prose overrides for markdown
+2. **Sidebar** (`Sidebar.tsx`) — Explicit border styling, elevated user profile section (`dark:bg-card/50`)
+3. **Session Items** (`SessionItem.tsx`) — Active state with blue accent border, hover with border reveal, smooth transitions
+4. **New Session Button** (`NewSessionButton.tsx`) — Dark card-style button replacing harsh inverted default
+5. **Chat Input** (`ChatInput.tsx`) — Uses `dark:bg-input` with blue focus ring (`dark:focus-within:shadow-[0_0_0_3px_...]`)
+6. **Message Bubbles** (`MessageItem.tsx`) — Replaced `text-black dark:text-white` with `text-foreground`, improved table headers with `uppercase tracking-wider` and muted dark text
+7. **Tables** (`MessageItem.tsx`, `InteractiveTable.tsx`) — `dark:bg-muted/30` table headers, muted foreground header text
+8. **Tool Display** (`ToolCallDisplay.tsx`) — Dark variants for all status colors (blue/green/red borders and backgrounds), shimmer animation dark mode
+9. **Reasoning Timeline** (`ReasoningTimeline.tsx`) — Blue-600 → blue-400 for dark mode text
+10. **Code Blocks** (`code-block.tsx`) — `#000000` → `#1a1a1a` for less eye strain
+11. **Prompt Echo** (`PromptEcho.tsx`) — `text-foreground` instead of hardcoded black/white
+12. **Status Icon** (`status-icon.tsx`) — Dark variants for running state (blue-700 border, blue-950 bg)
+
+**Tests:** 126 frontend tests pass, 557 backend tests pass — 0 regressions
 
 ### Phase 10: Chat Input UI & Skills Configuration ✅ COMPLETE
 
@@ -443,6 +464,31 @@ bun run sync:skills --unprotect=<id>  # Unprotect skill
 
 <details>
 <summary>Click to expand session history</summary>
+
+### Session 16 — 2026-02-15
+
+**UI Polish: Dark Mode, Border Fix, Tool Step Display - COMPLETE:**
+
+**Changes (6 files modified, 1 file created):**
+
+1. **Chatbox border visibility** — Changed `border-muted/40` to `border-border` with `focus-within:border-muted-foreground/50` for better contrast
+2. **Dark mode support** — Created `useTheme` hook with system preference detection, localStorage persistence, and `.dark` class toggling. Added Sun/Moon toggle button to sidebar header. Added dark mode variants to ToolCallDisplay, StatusIcon, and ReasoningTrace components.
+3. **Tool step expanded content** — Redesigned `ToolStepContent` in ReasoningTrace to show tool-specific details:
+   - Search tools (web_search, paper_search): Queries + Sources (unchanged)
+   - Video tools (video_probe, video_download, video_transcript): Parameters summary (URL, format, quality, language) + Result output
+   - File tools (file_reader, file_writer): Path + Result preview
+   - Shell tools (bash_executor): Command + Result output
+   - Added video tool labels to TOOL_LABELS map and status messages
+
+**Files Created (1):**
+- `apps/web/src/hooks/useTheme.ts` — Theme hook with system preference, localStorage, toggle
+
+**Files Modified (5):**
+- `apps/web/src/components/chat/ChatInput.tsx` — Border color fix
+- `apps/web/src/components/layout/Sidebar.tsx` — Theme toggle button in header
+- `apps/web/src/components/chat/ToolCallDisplay.tsx` — Dark mode variants, video status labels
+- `apps/web/src/components/inspector/ReasoningTrace.tsx` — Tool-specific expanded content, video labels, dark mode
+- `apps/web/src/components/ui/status-icon.tsx` — Dark mode for running state
 
 ### Session 15 — 2026-02-15
 

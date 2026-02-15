@@ -15,6 +15,7 @@ import { getExternalSkillLoader } from '../services/external-skills/loader';
 import { getSandboxManager, SandboxOrchestrator } from '../services/sandbox';
 import { getBrowserManager, wrapExecutorWithBrowserEvents } from '../services/browser';
 import type { ExecutionMode, InspectorTab } from '@mark/shared';
+import { decodeVideoSnapshotProgress } from '../services/tools/video_snapshot_progress';
 
 /** Prisma P2003 = foreign key constraint violated (e.g. session deleted during stream) */
 function isPrismaForeignKeyError(err: unknown): boolean {
@@ -374,6 +375,21 @@ async function processAgentTurn(
   let finalContent = '';
 
   const reasoningTimers = new Map<string, number>();
+  const reasoningEventSeq = new Map<string, number>();
+  const reasoningStepIndex = new Map<string, number>();
+  const queuedReasoningEvents: Array<{
+    stepId: string;
+    label: string;
+    status: 'running' | 'completed';
+    message?: string;
+    details?: { queries?: string[]; sources?: string[]; toolName?: string };
+    thinkingContent?: string;
+    finalStatus?: 'SUCCEEDED' | 'FAILED' | 'CANCELED';
+  }> = [];
+  let activeReasoningStepId: string | null = null;
+  let nextReasoningStepIndex = 1;
+  let lastReasoningTimestamp = 0;
+  const reasoningTraceId = `reasoning-trace-${sessionId}-${Date.now()}`;
   const searchToolNames = new Set(['web_search', 'paper_search']);
   const videoToolNames = new Set(['video_download', 'video_probe', 'video_transcript']);
   const videoToolLabels: Record<string, string> = {
@@ -389,10 +405,13 @@ async function processAgentTurn(
   // Collector array for completed reasoning steps to persist in message metadata
   const completedReasoningSteps: Array<{
     stepId: string;
+    stepIndex: number;
+    traceId: string;
     label: string;
     startedAt: number;
     completedAt: number;
     durationMs: number;
+    finalStatus: 'SUCCEEDED' | 'FAILED' | 'CANCELED';
     message?: string;
     details?: { queries?: string[]; sources?: string[]; toolName?: string };
     thinkingContent?: string;
@@ -405,6 +424,7 @@ async function processAgentTurn(
     message,
     details,
     thinkingContent,
+    finalStatus,
   }: {
     stepId: string;
     label: string;
@@ -412,9 +432,47 @@ async function processAgentTurn(
     message?: string;
     details?: { queries?: string[]; sources?: string[]; toolName?: string };
     thinkingContent?: string;
+    finalStatus?: 'SUCCEEDED' | 'FAILED' | 'CANCELED';
   }) => {
-    const now = Date.now();
+    if (status === 'completed' && !reasoningTimers.has(stepId)) {
+      await emitReasoningStep({
+        stepId,
+        label,
+        status: 'running',
+        message: message || 'Step started.',
+        details,
+        thinkingContent,
+      });
+    }
+
+    if (activeReasoningStepId && activeReasoningStepId !== stepId) {
+      queuedReasoningEvents.push({
+        stepId,
+        label,
+        status,
+        message,
+        details,
+        thinkingContent,
+        finalStatus,
+      });
+      return;
+    }
+
+    if (!reasoningStepIndex.has(stepId)) {
+      reasoningStepIndex.set(stepId, nextReasoningStepIndex++);
+    }
+    const stepIndex = reasoningStepIndex.get(stepId)!;
+
+    const eventSeq = (reasoningEventSeq.get(stepId) || 0) + 1;
+    reasoningEventSeq.set(stepId, eventSeq);
+
+    const now = Math.max(Date.now(), lastReasoningTimestamp + 1);
+    lastReasoningTimestamp = now;
+    const lifecycle: 'STARTED' | 'UPDATED' | 'FINISHED' =
+      status === 'running' ? (eventSeq === 1 ? 'STARTED' : 'UPDATED') : 'FINISHED';
+
     if (status === 'running') {
+      activeReasoningStepId = stepId;
       reasoningTimers.set(stepId, now);
     }
     const startedAt = reasoningTimers.get(stepId);
@@ -424,14 +482,18 @@ async function processAgentTurn(
     if (status === 'completed' && startedAt && durationMs !== undefined) {
       completedReasoningSteps.push({
         stepId,
+        stepIndex,
+        traceId: reasoningTraceId,
         label,
         startedAt,
         completedAt: now,
         durationMs,
+        finalStatus: finalStatus ?? 'SUCCEEDED',
         message,
         details,
         thinkingContent,
       });
+      activeReasoningStepId = null;
     }
 
     await sseStream.writeSSE({
@@ -440,9 +502,15 @@ async function processAgentTurn(
         sessionId,
         timestamp: now,
         data: {
+          eventId: `${reasoningTraceId}:${stepId}:${eventSeq}`,
+          traceId: reasoningTraceId,
           stepId,
+          stepIndex,
+          eventSeq,
+          lifecycle,
           label,
           status,
+          finalStatus: status === 'completed' ? finalStatus ?? 'SUCCEEDED' : undefined,
           message,
           durationMs,
           details,
@@ -450,6 +518,11 @@ async function processAgentTurn(
         },
       }),
     });
+
+    if (!activeReasoningStepId && queuedReasoningEvents.length > 0) {
+      const queued = queuedReasoningEvents.shift()!;
+      await emitReasoningStep(queued);
+    }
   };
 
   // Emit initial step (will be relabeled based on whether tools are used)
@@ -678,6 +751,8 @@ async function processAgentTurn(
     // Execute each tool
     for (const toolCall of toolCallsCollected) {
       const params = JSON.parse(toolCall.arguments || '{}');
+      let videoSnapshotActionIndex = 0;
+      let videoSnapshotBrowserLaunched = false;
 
       // Check if tool call should be allowed
       const toolCheck = taskManager.getToolCallDecision(
@@ -713,6 +788,7 @@ async function processAgentTurn(
           label: searchToolNames.has(toolCall.name) ? 'Searching' : videoToolLabels[toolCall.name] || 'Executing tool',
           status: 'completed',
           message: toolCheck.reason || 'Tool call not allowed.',
+          finalStatus: 'CANCELED',
           details: {
             toolName: toolCall.name,
           },
@@ -725,6 +801,74 @@ async function processAgentTurn(
       try {
         const result = await toolExecutor.execute(toolCall.name, params, {
           onProgress: async (current: number, total: number, message?: string) => {
+            let progressMessage = message;
+            if (toolCall.name === 'video_download') {
+              const snapshot = decodeVideoSnapshotProgress(message);
+              if (snapshot) {
+                const videoUrl =
+                  snapshot.sourceUrl ||
+                  (typeof params.url === 'string' ? params.url : '');
+                const atSeconds = Math.max(0, Math.floor(snapshot.atSeconds));
+                const hrs = Math.floor(atSeconds / 3600);
+                const mins = Math.floor((atSeconds % 3600) / 60);
+                const secs = atSeconds % 60;
+                const displayTime =
+                  hrs > 0
+                    ? `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+                    : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+                if (!videoSnapshotBrowserLaunched) {
+                  videoSnapshotBrowserLaunched = true;
+                  await sseStream.writeSSE({
+                    data: JSON.stringify({
+                      type: 'browser.launched',
+                      sessionId,
+                      timestamp: Date.now(),
+                      data: { message: 'Video snapshot session started' },
+                    }),
+                  });
+                  if (videoUrl) {
+                    await sseStream.writeSSE({
+                      data: JSON.stringify({
+                        type: 'browser.navigated',
+                        sessionId,
+                        timestamp: Date.now(),
+                        data: { url: videoUrl, title: 'Video timeline snapshots' },
+                      }),
+                    });
+                  }
+                }
+
+                await sseStream.writeSSE({
+                  data: JSON.stringify({
+                    type: 'browser.action',
+                    sessionId,
+                    timestamp: Date.now(),
+                    data: {
+                      action: 'browser_screenshot',
+                      output: `Video snapshot at ${displayTime}`,
+                      params: videoUrl ? { url: videoUrl } : {},
+                    },
+                  }),
+                });
+
+                await sseStream.writeSSE({
+                  data: JSON.stringify({
+                    type: 'browser.screenshot',
+                    sessionId,
+                    timestamp: Date.now(),
+                    data: {
+                      screenshot: snapshot.screenshotBase64,
+                      actionIndex: videoSnapshotActionIndex,
+                    },
+                  }),
+                });
+
+                videoSnapshotActionIndex += 1;
+                progressMessage = `Captured video snapshot ${snapshot.index + 1}/${snapshot.total} at ${displayTime}`;
+              }
+            }
+
             await sseStream.writeSSE({
               data: JSON.stringify({
                 type: 'tool.progress',
@@ -735,7 +879,7 @@ async function processAgentTurn(
                   toolName: toolCall.name,
                   current,
                   total,
-                  message,
+                  message: progressMessage,
                   step: steps + 1,
                 },
               }),
@@ -819,6 +963,7 @@ async function processAgentTurn(
           label: searchToolNames.has(toolCall.name) ? 'Searching' : videoToolLabels[toolCall.name] || 'Executing tool',
           status: 'completed',
           message: result.success ? undefined : 'Failed.',
+          finalStatus: result.success ? 'SUCCEEDED' : 'FAILED',
           details: {
             toolName: toolCall.name,
           },
@@ -854,6 +999,7 @@ async function processAgentTurn(
           label: searchToolNames.has(toolCall.name) ? 'Searching' : videoToolLabels[toolCall.name] || 'Executing tool',
           status: 'completed',
           message: errorMsg,
+          finalStatus: 'FAILED',
           details: {
             toolName: toolCall.name,
           },

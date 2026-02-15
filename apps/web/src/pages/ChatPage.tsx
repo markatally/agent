@@ -7,7 +7,7 @@ import { InspectorPanel } from '../components/inspector/InspectorPanel';
 import { Button } from '../components/ui/button';
 import { MessageSquare, PanelRight, PanelLeft } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
-import { SkillsConfigModal } from '../components/skills/SkillsConfigModal';
+import { SkillsConfigModal, type SettingsTab } from '../components/skills/SkillsConfigModal';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useCreateSession } from '../hooks/useSessions';
 
@@ -19,8 +19,14 @@ export function ChatPage() {
   const setInspectorTab = useChatStore((state) => state.setInspectorTab);
   const sidebarOpen = useChatStore((state) => state.sidebarOpen);
   const setSidebarOpen = useChatStore((state) => state.setSidebarOpen);
-  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('layout');
   const createSession = useCreateSession();
+
+  const openSettings = (tab: SettingsTab) => {
+    setSettingsInitialTab(tab);
+    setSettingsModalOpen(true);
+  };
 
   useKeyboardShortcuts([
     {
@@ -36,12 +42,12 @@ export function ChatPage() {
     {
       key: 'k',
       metaKey: true,
-      handler: () => setSkillsModalOpen(true),
+      handler: () => openSettings('skills'),
     },
     {
       key: 'k',
       ctrlKey: true,
-      handler: () => setSkillsModalOpen(true),
+      handler: () => openSettings('skills'),
     },
     {
       key: 'b',
@@ -73,12 +79,12 @@ export function ChatPage() {
       <Sidebar
         collapsed={!sidebarOpen}
         onToggleCollapse={() => setSidebarOpen(false)}
-        onOpenSkillsConfig={() => setSkillsModalOpen(true)}
+        onOpenSettings={() => openSettings('layout')}
       />
 
       <div className="flex min-w-0 flex-[1_1_auto] overflow-hidden">
         {/* Main content area */}
-        <main className="relative flex min-w-0 flex-[1_1_auto] flex-col overflow-hidden">
+        <main className="relative flex min-w-0 flex-[1_1_auto] flex-col overflow-hidden dark:bg-[#212121]">
           {!sidebarOpen ? (
             <Button
               variant="ghost"
@@ -103,7 +109,7 @@ export function ChatPage() {
           ) : null}
 
           {sessionId ? (
-            <ChatContainer sessionId={sessionId} onOpenSkills={() => setSkillsModalOpen(true)} />
+            <ChatContainer sessionId={sessionId} onOpenSkills={() => openSettings('skills')} />
           ) : (
             // No session selected
             <div className="flex flex-1 flex-col items-center justify-center px-6">
@@ -118,7 +124,7 @@ export function ChatPage() {
                 <ChatInput
                   onSend={handleStartChat}
                   disabled={createSession.isPending}
-                  onOpenSkills={() => setSkillsModalOpen(true)}
+                  onOpenSkills={() => openSettings('skills')}
                 />
               </div>
             </div>
@@ -132,7 +138,11 @@ export function ChatPage() {
         />
       </div>
 
-      <SkillsConfigModal open={skillsModalOpen} onOpenChange={setSkillsModalOpen} />
+      <SkillsConfigModal
+        open={settingsModalOpen}
+        onOpenChange={setSettingsModalOpen}
+        initialTab={settingsInitialTab}
+      />
     </div>
   );
 }

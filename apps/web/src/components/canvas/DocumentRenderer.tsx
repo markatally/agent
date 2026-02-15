@@ -11,12 +11,11 @@ import { ThinkingIndicator } from '../chat/ThinkingIndicator';
 import { cn } from '../../lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import type { Artifact } from '@mark/shared';
+import { isHiddenArtifactName } from '../../lib/artifactFilters';
 
 interface DocumentRendererProps {
   sessionId: string;
 }
-
-const HIDDEN_ARTIFACT_NAMES = new Set(['search-results.json']);
 
 export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
   const { data: apiMessages, isLoading, error } = useSessionMessages(sessionId);
@@ -74,7 +73,7 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
         const callArtifacts = Array.isArray(call.result?.artifacts) ? call.result.artifacts : [];
         for (const artifact of callArtifacts) {
           if (!artifact?.name) continue;
-          if (HIDDEN_ARTIFACT_NAMES.has(artifact.name)) continue;
+          if (isHiddenArtifactName(artifact.name)) continue;
           const key = `${artifact.fileId || ''}:${artifact.name}`;
           if (dedupe.has(key)) continue;
           dedupe.add(key);
@@ -148,7 +147,7 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
 
   if (isLoading) {
     return (
-      <div className="flex w-full flex-col gap-4 px-4 py-8 md:px-6">
+      <div className="mx-auto flex w-full max-w-[var(--chat-content-max-width,1400px)] flex-col gap-4 px-4 py-8 md:px-6">
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-40 w-full" />
         <Skeleton className="h-32 w-5/6" />
@@ -195,7 +194,7 @@ export function DocumentRenderer({ sessionId }: DocumentRendererProps) {
 
   return (
     <TooltipProvider>
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6 px-4 pb-4 pt-8 md:px-6">
+      <div className="mx-auto flex w-full max-w-[var(--chat-content-max-width,1400px)] flex-col gap-6 px-4 pb-4 pt-8 md:px-6">
         {messages.map((message) => {
           if (message.role !== 'user') {
             if (!message.content) return null;

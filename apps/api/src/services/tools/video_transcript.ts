@@ -35,6 +35,11 @@ interface TranscriptSegment {
   text: string;
 }
 
+interface ParsedTimestampRange {
+  start: number;
+  end: number;
+}
+
 function isHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
@@ -84,7 +89,7 @@ function parseSubtitleSegments(content: string): TranscriptSegment[] {
     .map((block) => block.trim())
     .filter(Boolean);
 
-  const segments: TranscriptSegment[] = [];
+  const rawSegments: TranscriptSegment[] = [];
 
   for (const block of blocks) {
     const lines = block
@@ -114,17 +119,112 @@ function parseSubtitleSegments(content: string): TranscriptSegment[] {
     const text = cleanSubtitleText(textLines.join(' '));
     if (!text) continue;
 
-    const previous = segments.length > 0 ? segments[segments.length - 1] : null;
-    // Collapse repeated adjacent subtitle text from auto-generated tracks.
-    if (previous && previous.text === text && previous.end === start) {
-      previous.end = end;
+    rawSegments.push({ start, end, text });
+  }
+
+  return normalizeSubtitleSegments(rawSegments);
+}
+
+function parseTimestampToSeconds(value: string): number | null {
+  const normalized = value.trim().replace(',', '.');
+  const match = normalized.match(/^(\d{1,2}):(\d{2}):(\d{2}(?:\.\d+)?)$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+    return null;
+  }
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function parseRange(segment: TranscriptSegment): ParsedTimestampRange | null {
+  const start = parseTimestampToSeconds(segment.start);
+  const end = parseTimestampToSeconds(segment.end);
+  if (start == null || end == null) return null;
+  return { start, end };
+}
+
+function areNearBoundary(previousEnd: number, nextStart: number, toleranceSeconds = 0.2): boolean {
+  return Math.abs(nextStart - previousEnd) <= toleranceSeconds;
+}
+
+function durationSeconds(range: ParsedTimestampRange): number {
+  return Math.max(0, range.end - range.start);
+}
+
+function findOverlapSuffixPrefix(previousText: string, currentText: string): number {
+  const maxLen = Math.min(previousText.length, currentText.length);
+  for (let len = maxLen; len >= 8; len -= 1) {
+    if (previousText.slice(-len) === currentText.slice(0, len)) {
+      return len;
+    }
+  }
+  return 0;
+}
+
+function normalizeSubtitleSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
+  const normalized: TranscriptSegment[] = [];
+
+  for (const current of segments) {
+    if (normalized.length === 0) {
+      normalized.push({ ...current });
       continue;
     }
 
-    segments.push({ start, end, text });
+    const previous = normalized[normalized.length - 1];
+    const previousRange = parseRange(previous);
+    const currentRange = parseRange(current);
+
+    // If ranges are unparseable, preserve previous behavior and keep both.
+    if (!previousRange || !currentRange) {
+      normalized.push({ ...current });
+      continue;
+    }
+
+    if (!areNearBoundary(previousRange.end, currentRange.start)) {
+      normalized.push({ ...current });
+      continue;
+    }
+
+    if (previous.text === current.text) {
+      previous.end = current.end;
+      continue;
+    }
+
+    // Progressive cues often repeat previous text and append more words.
+    if (current.text.startsWith(previous.text)) {
+      previous.text = current.text;
+      previous.end = current.end;
+      continue;
+    }
+
+    // Some tracks emit micro-cues that "roll back" to a short repeated snippet.
+    if (previous.text.includes(current.text) && durationSeconds(currentRange) <= 0.35) {
+      previous.end = current.end;
+      continue;
+    }
+
+    // Trim textual overlap so only new continuation words are emitted.
+    const overlap = findOverlapSuffixPrefix(previous.text, current.text);
+    if (overlap > 0) {
+      const remainingText = normalizeWhitespace(current.text.slice(overlap));
+      if (!remainingText) {
+        previous.end = current.end;
+        continue;
+      }
+      normalized.push({
+        start: current.start,
+        end: current.end,
+        text: remainingText,
+      });
+      continue;
+    }
+
+    normalized.push({ ...current });
   }
 
-  return segments;
+  return normalized;
 }
 
 function buildTranscriptText(
@@ -598,19 +698,6 @@ export class VideoTranscriptTool implements Tool {
           mimeType: 'text/plain',
           fileId,
           size: transcriptStats.size,
-        },
-        {
-          type: 'data',
-          name: 'video-transcript.json',
-          content: JSON.stringify({
-            source,
-            language,
-            includeTimestamps,
-            segmentCount: segments.length,
-            transcript: transcriptText,
-            segments,
-          }),
-          mimeType: 'application/json',
         },
       ],
     };

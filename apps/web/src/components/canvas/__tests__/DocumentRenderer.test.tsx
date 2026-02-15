@@ -180,4 +180,53 @@ describe('DocumentRenderer artifacts', () => {
 
     expect(screen.queryByText('search-results.json')).not.toBeInTheDocument();
   });
+
+  it('hides internal video-probe.json artifacts from message output', () => {
+    vi.mocked(useSessionMessages).mockReturnValue({
+      data: [
+        {
+          id: 'assistant-video',
+          sessionId: 'session-1',
+          role: 'assistant',
+          content: 'Video analysis done.',
+          createdAt: new Date(),
+        },
+      ],
+      isLoading: false,
+      error: null,
+    } as any);
+
+    useChatStore.setState({
+      toolCalls: new Map([
+        [
+          'tool-video-probe',
+          {
+            sessionId: 'session-1',
+            messageId: 'assistant-video',
+            toolCallId: 'tool-video-probe',
+            toolName: 'video_probe',
+            params: {},
+            status: 'completed',
+            result: {
+              success: true,
+              output: 'done',
+              duration: 10,
+              artifacts: [
+                {
+                  type: 'data',
+                  name: 'video-probe.json',
+                  mimeType: 'application/json',
+                  content: '{}',
+                },
+              ],
+            },
+          },
+        ],
+      ]),
+    });
+
+    render(<DocumentRenderer sessionId="session-1" />);
+
+    expect(screen.queryByText('video-probe.json')).not.toBeInTheDocument();
+  });
 });

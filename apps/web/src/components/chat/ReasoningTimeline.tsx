@@ -72,7 +72,7 @@ export function ReasoningTimeline({ sessionId, alwaysExpanded = false }: Reasoni
             <span className="text-xs text-muted-foreground">({formatDuration(totalDuration)})</span>
           </div>
           {isActive ? (
-            <div className="flex items-center gap-2 text-xs text-blue-600">
+            <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span>In progress</span>
             </div>
@@ -90,7 +90,7 @@ export function ReasoningTimeline({ sessionId, alwaysExpanded = false }: Reasoni
             <span className="text-xs text-muted-foreground">({formatDuration(totalDuration)})</span>
           </div>
           {isActive ? (
-            <div className="flex items-center gap-2 text-xs text-blue-600">
+            <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span>In progress</span>
             </div>
@@ -101,7 +101,8 @@ export function ReasoningTimeline({ sessionId, alwaysExpanded = false }: Reasoni
       {isExpanded ? (
         <div className="space-y-3 px-4 pb-4">
           {reasoningSteps.map((step, index) => {
-            const isCompleted = step.status === 'completed';
+            const isCompleted = step.status !== 'running';
+            const isFailed = step.status === 'failed' || step.status === 'canceled';
             const duration = isCompleted
               ? (step.durationMs || (step.completedAt || 0) - step.startedAt)
               : Date.now() - step.startedAt;
@@ -110,7 +111,7 @@ export function ReasoningTimeline({ sessionId, alwaysExpanded = false }: Reasoni
             return (
               <div key={step.stepId} className="relative flex gap-3">
                 <div className="flex flex-col items-center">
-                  <StatusIcon status={isCompleted ? 'completed' : 'running'} size="md" />
+                  <StatusIcon status={isFailed ? 'failed' : isCompleted ? 'completed' : 'running'} size="md" />
                   {!isLast && <div className="mt-1 h-full w-px bg-border" />}
                 </div>
 

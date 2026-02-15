@@ -12,6 +12,11 @@ const mockContext: ToolContext = {
   workspaceDir: '/tmp/video-tools-workspace',
 };
 
+function extractSegmentCount(output: string): number {
+  const match = output.match(/Segments:\s+(\d+)/);
+  return match ? Number(match[1]) : 0;
+}
+
 async function safeCleanup(filepath: string): Promise<void> {
   await fs.rm(filepath, { recursive: true, force: true }).catch(() => {});
 }
@@ -161,6 +166,121 @@ describe('VideoDownloadTool', () => {
     expect(parsed.installCommands.length).toBeGreaterThan(0);
     expect(parsed.recoveryHint).toContain('bash_executor');
   });
+
+  it('captures at least 10 preview snapshots for shorter videos when ffmpeg is available', async () => {
+    const progressMessages: string[] = [];
+    const tool = new VideoDownloadTool(mockContext, {
+      execFileFn: async (command, args) => {
+        if (args.includes('--version')) {
+          return { stdout: '2026.01.01\n', stderr: '' };
+        }
+
+        if (command === 'ffprobe') {
+          return { stdout: '400\n', stderr: '' };
+        }
+
+        if (command === 'ffmpeg') {
+          const outputPath = args[args.length - 1];
+          await fs.writeFile(outputPath, Buffer.from(`frame-${outputPath}`));
+          return { stdout: '', stderr: '' };
+        }
+
+        const outputIndex = args.findIndex((value) => value === '--output');
+        const template = outputIndex >= 0 ? args[outputIndex + 1] : '';
+        const outputPath = template.replace('.%(ext)s', '.mp4');
+        await fs.mkdir(path.dirname(outputPath), { recursive: true });
+        await fs.writeFile(outputPath, 'video-content');
+        return { stdout: `${outputPath}\n`, stderr: '' };
+      },
+      persistFileRecord: async () => 'file-with-snapshots',
+    });
+
+    const result = await tool.execute(
+      {
+        url: 'https://example.com/video',
+        filename: 'download-with-snapshots',
+      },
+      (_current, _total, message) => {
+        if (message) progressMessages.push(message);
+      }
+    );
+
+    expect(result.success).toBe(true);
+    expect(Array.isArray(result.previewSnapshots)).toBe(true);
+    expect(result.previewSnapshots?.length).toBe(10);
+    expect(result.previewSnapshots?.every((item) => item.startsWith('data:image/jpeg;base64,'))).toBe(
+      true
+    );
+    expect(result.output).toContain('Snapshots: 10 frame');
+    expect(progressMessages.some((msg) => msg.startsWith('__video_snapshot__'))).toBe(true);
+  });
+
+  it('caps preview snapshots at 20 for longer videos', async () => {
+    const tool = new VideoDownloadTool(mockContext, {
+      execFileFn: async (command, args) => {
+        if (args.includes('--version')) {
+          return { stdout: '2026.01.01\n', stderr: '' };
+        }
+
+        if (command === 'ffprobe') {
+          return { stdout: '7200\n', stderr: '' };
+        }
+
+        if (command === 'ffmpeg') {
+          const outputPath = args[args.length - 1];
+          await fs.writeFile(outputPath, Buffer.from(`frame-${outputPath}`));
+          return { stdout: '', stderr: '' };
+        }
+
+        const outputIndex = args.findIndex((value) => value === '--output');
+        const template = outputIndex >= 0 ? args[outputIndex + 1] : '';
+        const outputPath = template.replace('.%(ext)s', '.mp4');
+        await fs.mkdir(path.dirname(outputPath), { recursive: true });
+        await fs.writeFile(outputPath, 'video-content');
+        return { stdout: `${outputPath}\n`, stderr: '' };
+      },
+      persistFileRecord: async () => 'file-with-many-snapshots',
+    });
+
+    const result = await tool.execute({
+      url: 'https://example.com/video',
+      filename: 'download-long-video',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.previewSnapshots?.length).toBe(20);
+    expect(result.output).toContain('Snapshots: 20 frame');
+  });
+
+  it('skips preview snapshots when ffmpeg is unavailable', async () => {
+    const tool = new VideoDownloadTool(mockContext, {
+      execFileFn: async (command, args) => {
+        if (args.includes('--version')) {
+          if (command === 'ffmpeg') {
+            throw new Error('ffmpeg missing');
+          }
+          return { stdout: '2026.01.01\n', stderr: '' };
+        }
+
+        const outputIndex = args.findIndex((value) => value === '--output');
+        const template = outputIndex >= 0 ? args[outputIndex + 1] : '';
+        const outputPath = template.replace('.%(ext)s', '.mp4');
+        await fs.mkdir(path.dirname(outputPath), { recursive: true });
+        await fs.writeFile(outputPath, 'video-content');
+        return { stdout: `${outputPath}\n`, stderr: '' };
+      },
+      persistFileRecord: async () => 'file-no-snapshots',
+    });
+
+    const result = await tool.execute({
+      url: 'https://example.com/video',
+      filename: 'download-no-snapshots',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.previewSnapshots).toBeUndefined();
+    expect(result.output).not.toContain('Snapshots:');
+  });
 });
 
 describe('VideoTranscriptTool', () => {
@@ -213,13 +333,10 @@ describe('VideoTranscriptTool', () => {
       (item) => item.type === 'file' && item.name.endsWith('.transcript.txt')
     );
     expect(transcriptArtifact?.fileId).toBe('file-transcript-456');
-
-    const dataArtifact = result.artifacts?.find((item) => item.name === 'video-transcript.json');
-    expect(dataArtifact).toBeDefined();
-    const payload = JSON.parse(String(dataArtifact?.content || '{}'));
-    expect(payload.segmentCount).toBe(2);
-    expect(payload.transcript).toContain('Hello world');
-    expect(payload.transcript).toContain('[00:00:00.000 --> 00:00:02.000]');
+    expect(result.artifacts?.length).toBe(1);
+    expect(result.output).toContain('Hello world');
+    expect(result.output).toContain('[00:00:00.000 --> 00:00:02.000]');
+    expect(extractSegmentCount(result.output)).toBe(2);
   });
 
   it('returns install guidance when no yt-dlp runner is available', async () => {
@@ -309,12 +426,9 @@ describe('VideoTranscriptTool', () => {
     expect(result.output).toContain('Transcript extraction completed.');
     expect(result.output).toContain('whisper:');
     expect(persistedFilename).toBe('whisper-fallback-test.transcript.txt');
-    expect(result.artifacts?.length).toBe(2);
-
-    const dataArtifact = result.artifacts?.find((item) => item.name === 'video-transcript.json');
-    const payload = JSON.parse(String(dataArtifact?.content || '{}'));
-    expect(payload.segmentCount).toBe(2);
-    expect(payload.transcript).toContain('Whisper transcribed line one');
+    expect(result.artifacts?.length).toBe(1);
+    expect(result.output).toContain('Whisper transcribed line one');
+    expect(extractSegmentCount(result.output)).toBe(2);
   });
 
   it('returns WHISPER_NOT_FOUND error when whisper missing and no subtitles', async () => {
@@ -470,12 +584,10 @@ describe('VideoTranscriptTool', () => {
     expect(result.output).toContain('Transcript extraction completed.');
     expect(result.output).toContain('ai-zh.srt');
     expect(persistedFilename).toBe('bilibili-ai-zh-test.transcript.txt');
-
-    const dataArtifact = result.artifacts?.find((item) => item.name === 'video-transcript.json');
-    const payload = JSON.parse(String(dataArtifact?.content || '{}'));
-    expect(payload.segmentCount).toBe(3);
-    expect(payload.transcript).toContain('这期视频呢会跟大家分享一下这三部分的内容');
-    expect(payload.transcript).toContain('clouds skills的工作原理');
+    expect(result.artifacts?.length).toBe(1);
+    expect(result.output).toContain('这期视频呢会跟大家分享一下这三部分的内容');
+    expect(result.output).toContain('clouds skills的工作原理');
+    expect(extractSegmentCount(result.output)).toBe(3);
   });
 
   it('includes transcript text in output field for conversation history', async () => {
@@ -518,5 +630,66 @@ describe('VideoTranscriptTool', () => {
     expect(result.output).toContain('--- Transcript ---');
     expect(result.output).toContain('First line of dialogue');
     expect(result.output).toContain('Second line of dialogue');
+  });
+
+  it('deduplicates overlapping incremental subtitle cues from auto-generated tracks', async () => {
+    const tool = new VideoTranscriptTool(mockContext, {
+      execFileFn: async (_command, args) => {
+        if (args.includes('--version')) {
+          return { stdout: '2026.01.01\n', stderr: '' };
+        }
+
+        const outputIndex = args.findIndex((v) => v === '--output');
+        const template = outputIndex >= 0 ? args[outputIndex + 1] : '';
+        const subtitlePath = template.replace('.%(ext)s', '.en.vtt');
+        await fs.mkdir(path.dirname(subtitlePath), { recursive: true });
+        await fs.writeFile(
+          subtitlePath,
+          [
+            'WEBVTT',
+            '',
+            '00:00:00.160 --> 00:00:02.800',
+            'ZAI just released their new model GLM5.',
+            '',
+            '00:00:02.800 --> 00:00:04.630',
+            'ZAI just released their new model GLM5. So I ran it through the same benchmark',
+            '',
+            '00:00:04.630 --> 00:00:04.640',
+            'So I ran it through the same benchmark',
+            '',
+            '00:00:04.640 --> 00:00:07.909',
+            'So I ran it through the same benchmark tests I used on Opus 4.6 and GPT 5.3',
+            '',
+            '00:00:07.909 --> 00:00:07.919',
+            'tests I used on Opus 4.6 and GPT 5.3',
+            '',
+            '00:00:07.919 --> 00:00:10.310',
+            'tests I used on Opus 4.6 and GPT 5.3 codecs. Same prompts, same setup, same',
+            '',
+          ].join('\n'),
+          'utf8'
+        );
+        return { stdout: '', stderr: '' };
+      },
+      persistFileRecord: async () => 'file-overlap-dedupe',
+    });
+
+    const result = await tool.execute({
+      url: 'https://www.youtube.com/watch?v=CQILCWuQqdo',
+      language: 'en',
+      includeTimestamps: true,
+      filename: 'incremental-overlap-test',
+    });
+
+    expect(result.success).toBe(true);
+    expect(extractSegmentCount(result.output)).toBeLessThanOrEqual(3);
+    expect(result.output).toContain('ZAI just released their new model GLM5. So I ran it through the same benchmark');
+    expect(result.output).toContain('tests I used on Opus 4.6 and GPT 5.3 codecs. Same prompts, same setup, same');
+    expect(result.output).not.toContain(
+      '[00:00:04.630 --> 00:00:04.640] So I ran it through the same benchmark'
+    );
+    expect(result.output).not.toContain(
+      '[00:00:07.909 --> 00:00:07.919] tests I used on Opus 4.6 and GPT 5.3'
+    );
   });
 });

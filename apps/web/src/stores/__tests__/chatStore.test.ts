@@ -16,6 +16,13 @@ describe('chatStore', () => {
       streamingContent: '',
       isStreaming: false,
       toolCalls: new Map(),
+      reasoningSteps: new Map(),
+      reasoningActiveStepId: new Map(),
+      reasoningLastStepIndex: new Map(),
+      reasoningSeenEventIds: new Map(),
+      reasoningPendingEvents: new Map(),
+      reasoningLateEventLog: new Map(),
+      reasoningLastTimestamp: new Map(),
       agentRunStartIndex: new Map(),
     });
   });
@@ -501,6 +508,161 @@ describe('chatStore', () => {
 
       useChatStore.getState().setAgentRunStartIndex(sessionId);
       expect(useChatStore.getState().agentRunStartIndex.get(sessionId)).toBe(2);
+    });
+  });
+
+  describe('reasoning trace state machine', () => {
+    const sessionId = 'session-reasoning-sm';
+    const traceId = 'trace-1';
+    let ts = 1_000;
+    const nextTs = () => {
+      ts += 10;
+      return ts;
+    };
+
+    const apply = (event: {
+      eventId: string;
+      stepId: string;
+      stepIndex: number;
+      eventSeq: number;
+      lifecycle: 'STARTED' | 'UPDATED' | 'FINISHED';
+      label?: string;
+      finalStatus?: 'SUCCEEDED' | 'FAILED' | 'CANCELED';
+    }) => {
+      useChatStore.getState().applyReasoningEvent(sessionId, {
+        eventId: event.eventId,
+        traceId,
+        stepId: event.stepId,
+        stepIndex: event.stepIndex,
+        eventSeq: event.eventSeq,
+        lifecycle: event.lifecycle,
+        timestamp: nextTs(),
+        label: event.label || `Step ${event.stepIndex}`,
+        finalStatus: event.finalStatus,
+      });
+    };
+
+    it('enforces single active step and strict step sequencing', () => {
+      apply({
+        eventId: 'e1',
+        stepId: 's1',
+        stepIndex: 1,
+        eventSeq: 1,
+        lifecycle: 'STARTED',
+      });
+      apply({
+        eventId: 'e2',
+        stepId: 's2',
+        stepIndex: 2,
+        eventSeq: 1,
+        lifecycle: 'STARTED',
+      });
+
+      let steps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
+      expect(steps).toHaveLength(1);
+      expect(steps[0]?.stepId).toBe('s1');
+      expect(steps[0]?.status).toBe('running');
+
+      apply({
+        eventId: 'e3',
+        stepId: 's1',
+        stepIndex: 1,
+        eventSeq: 2,
+        lifecycle: 'FINISHED',
+      });
+
+      steps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
+      expect(steps.map((step) => step.stepId)).toEqual(['s1', 's2']);
+      expect(steps[0]?.status).toBe('completed');
+      expect(steps[1]?.status).toBe('running');
+      expect(steps.filter((step) => step.status === 'running')).toHaveLength(1);
+    });
+
+    it('does not mutate terminal steps and logs late events', () => {
+      apply({
+        eventId: 't1',
+        stepId: 'term-1',
+        stepIndex: 1,
+        eventSeq: 1,
+        lifecycle: 'STARTED',
+      });
+      apply({
+        eventId: 't2',
+        stepId: 'term-1',
+        stepIndex: 1,
+        eventSeq: 2,
+        lifecycle: 'FINISHED',
+        finalStatus: 'SUCCEEDED',
+      });
+
+      const completedStep = (useChatStore.getState().reasoningSteps.get(sessionId) || [])[0];
+      apply({
+        eventId: 't3',
+        stepId: 'term-1',
+        stepIndex: 1,
+        eventSeq: 3,
+        lifecycle: 'UPDATED',
+      });
+
+      const stepAfterLate = (useChatStore.getState().reasoningSteps.get(sessionId) || [])[0];
+      const lateEvents = useChatStore.getState().reasoningLateEventLog.get(sessionId) || [];
+      expect(stepAfterLate).toEqual(completedStep);
+      expect(lateEvents.some((entry) => entry.eventId === 't3')).toBe(true);
+    });
+
+    it('reorders out-of-order lifecycle events and dedupes by event id', () => {
+      apply({
+        eventId: 'o2',
+        stepId: 'out-1',
+        stepIndex: 1,
+        eventSeq: 2,
+        lifecycle: 'FINISHED',
+      });
+      apply({
+        eventId: 'o1',
+        stepId: 'out-1',
+        stepIndex: 1,
+        eventSeq: 1,
+        lifecycle: 'STARTED',
+      });
+      apply({
+        eventId: 'o1',
+        stepId: 'out-1',
+        stepIndex: 1,
+        eventSeq: 1,
+        lifecycle: 'STARTED',
+      });
+
+      const steps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
+      expect(steps).toHaveLength(1);
+      expect(steps[0]?.status).toBe('completed');
+      expect(steps[0]?.lastEventSeq).toBe(2);
+    });
+
+    it('e2e simulation preserves invariants across shuffled events', () => {
+      const events = [
+        { eventId: 'a1', stepId: 'a', stepIndex: 1, eventSeq: 1, lifecycle: 'STARTED' as const },
+        { eventId: 'b1', stepId: 'b', stepIndex: 2, eventSeq: 1, lifecycle: 'STARTED' as const },
+        { eventId: 'a2', stepId: 'a', stepIndex: 1, eventSeq: 2, lifecycle: 'FINISHED' as const },
+        { eventId: 'c1', stepId: 'c', stepIndex: 3, eventSeq: 1, lifecycle: 'STARTED' as const },
+        { eventId: 'b2', stepId: 'b', stepIndex: 2, eventSeq: 2, lifecycle: 'FINISHED' as const },
+        { eventId: 'c2', stepId: 'c', stepIndex: 3, eventSeq: 2, lifecycle: 'FINISHED' as const, finalStatus: 'FAILED' as const },
+      ];
+
+      // Intentionally shuffled delivery order
+      const shuffled = [events[1], events[0], events[3], events[2], events[5], events[4]];
+      for (const event of shuffled) {
+        apply(event);
+        const steps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
+        expect(steps.filter((step) => step.status === 'running').length).toBeLessThanOrEqual(1);
+        const indices = steps.map((step) => step.stepIndex ?? 0);
+        expect(indices).toEqual([...indices].sort((a, b) => a - b));
+      }
+
+      const finalSteps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
+      expect(finalSteps.map((step) => step.stepIndex)).toEqual([1, 2, 3]);
+      expect(finalSteps.map((step) => step.status)).toEqual(['completed', 'completed', 'failed']);
+      expect(finalSteps.every((step) => step.completedAt && step.durationMs !== undefined)).toBe(true);
     });
   });
 });

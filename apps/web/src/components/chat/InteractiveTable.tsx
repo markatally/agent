@@ -186,7 +186,7 @@ export function InteractiveTable({ table, isStreaming = false }: InteractiveTabl
         </div>
       )}
       <table className="w-full border-collapse text-sm">
-        <thead className="bg-muted/50 border-b border-border">
+        <thead className="bg-muted/50 border-b border-border dark:bg-muted/30">
           <tr>
             {schema.columns.map((column) => {
               const canSort = column.sortable && !isStreaming;
@@ -195,7 +195,7 @@ export function InteractiveTable({ table, isStreaming = false }: InteractiveTabl
                   key={column.key}
                   onClick={() => handleHeaderClick(column)}
                   className={cn(
-                    'px-4 py-3 font-semibold text-foreground whitespace-nowrap text-left',
+                    'px-4 py-3 font-medium text-xs uppercase tracking-wider text-foreground dark:text-muted-foreground dark:font-semibold whitespace-nowrap text-left',
                     canSort && 'cursor-pointer select-none hover:bg-muted/70 transition-colors',
                     !canSort && column.sortable && 'cursor-not-allowed opacity-70'
                   )}

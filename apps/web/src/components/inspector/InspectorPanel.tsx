@@ -102,6 +102,9 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
       : fallbackMessageKey ?? sessionId ?? '';
   const reasoningSteps = reasoningKey ? reasoningMap.get(reasoningKey) || [] : [];
   const hasRunningReasoning = reasoningSteps.some((step) => step.status === 'running');
+  const hasFailedReasoning = reasoningSteps.some(
+    (step) => step.status === 'failed' || step.status === 'canceled'
+  );
   const hasFailedExecution = executionSteps.some((step) => step.status === 'failed');
   const hasComputerActivity =
     executionSteps.length > 0 ||
@@ -126,7 +129,7 @@ export function InspectorPanel({ open, sessionId, onClose }: InspectorPanelProps
         : 'Idle';
   const reasoningStatusLabel = hasRunningReasoning
     ? 'Running'
-    : hasFailedToolCall
+    : hasFailedToolCall || hasFailedReasoning
       ? 'Failed'
       : reasoningSteps.length > 0
         ? 'Completed'

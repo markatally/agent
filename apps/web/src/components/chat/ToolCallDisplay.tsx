@@ -15,7 +15,7 @@ interface ToolCallDisplayProps {
 
 // Shimmer effect for loading content
 const Shimmer = ({ className }: { className?: string }) => (
-  <div className={cn('animate-pulse bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 bg-[length:200%_100%]', className)} style={{ animation: 'shimmer 1.5s infinite' }} />
+  <div className={cn('animate-pulse bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 bg-[length:200%_100%]', className)} style={{ animation: 'shimmer 1.5s infinite' }} />
 );
 
 // Add shimmer keyframes to global styles if not already present
@@ -94,6 +94,9 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
     if (status === 'running') {
       if (toolName === 'web_search') return 'Searching...';
       if (toolName === 'ppt_generator') return 'Generating...';
+      if (toolName === 'video_probe') return 'Probing video...';
+      if (toolName === 'video_download') return 'Downloading video...';
+      if (toolName === 'video_transcript') return 'Extracting transcript...';
       return 'Running...';
     }
     return status;
@@ -105,7 +108,7 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
         <span>Tool Calls</span>
         <span className="text-muted-foreground">
           {sessionToolCalls.filter(c => c.status === 'running').length > 0 && (
-            <span className="flex items-center gap-1 text-blue-600">
+            <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
               <Loader2 className="h-3 w-3 animate-spin" />
               {sessionToolCalls.filter(c => c.status === 'running').length} in progress
             </span>
@@ -128,9 +131,9 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
             key={toolName}
             className={cn(
               'text-sm transition-all duration-200',
-              isRunning && 'border-blue-200 bg-blue-50/30',
-              representativeCall.status === 'completed' && 'border-green-200 bg-green-50/20',
-              representativeCall.status === 'failed' && 'border-red-200 bg-red-50/20'
+              isRunning && 'border-blue-200 bg-blue-50/30 dark:border-blue-800 dark:bg-blue-950/30',
+              representativeCall.status === 'completed' && 'border-green-200 bg-green-50/20 dark:border-green-800 dark:bg-green-950/20',
+              representativeCall.status === 'failed' && 'border-red-200 bg-red-50/20 dark:border-red-800 dark:bg-red-950/20'
             )}
           >
             <CardHeader
@@ -185,7 +188,7 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
                     }
                     className={cn(
                       'flex items-center gap-1',
-                      isRunning && 'bg-blue-100 text-blue-700 hover:bg-blue-100'
+                      isRunning && 'bg-blue-100 text-blue-700 hover:bg-blue-100 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-900'
                     )}
                   >
                     <StatusIcon
@@ -238,7 +241,7 @@ export function ToolCallDisplay({ sessionId }: ToolCallDisplayProps) {
 
                 {/* Running indicator */}
                 {isRunning && (
-                  <div className="text-xs text-blue-600 flex items-center gap-2">
+                  <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-2">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     <span>{getStatusLabel(representativeCall.status, toolName)}</span>
                   </div>

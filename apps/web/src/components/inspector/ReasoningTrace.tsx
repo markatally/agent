@@ -26,8 +26,9 @@ interface ToolCallStatus {
 
 interface ReasoningStepEntry {
   stepId: string;
+  stepIndex?: number;
   label: string;
-  status: 'running' | 'completed';
+  status: 'running' | 'completed' | 'failed' | 'canceled';
   startedAt: number;
   completedAt?: number;
   durationMs?: number;
@@ -68,6 +69,10 @@ const TOOL_LABELS: Record<string, string> = {
   file_reader: 'File Reader',
   file_writer: 'File Writer',
   bash_executor: 'Shell Command',
+  video_probe: 'Video Probe',
+  video_download: 'Video Download',
+  video_transcript: 'Video Transcript',
+  video_analysis: 'Video Analysis',
 };
 
 const DURATION_THROTTLE_MS = 10;
@@ -301,11 +306,13 @@ function getToolStepStatus(toolCalls: ToolCallStatus[], fallback: StepStatus = '
 }
 
 function createReasoningTimelineStep(step: ReasoningStepEntry, type: TimelineStepType): TimelineStep {
+  const mappedStatus: StepStatus =
+    step.status === 'running' ? 'running' : step.status === 'failed' ? 'failed' : 'completed';
   return {
     id: step.stepId,
     type,
     title: titleForStepType(type),
-    status: step.status,
+    status: mappedStatus,
     startedAt: step.startedAt,
     completedAt: step.completedAt,
     durationMs: step.durationMs,
@@ -334,7 +341,14 @@ function createToolTimelineStep(
     id: step?.stepId ?? fallbackId,
     type: 'tool',
     title: titleForStepType('tool'),
-    status: getToolStepStatus(toolCalls, step?.status ?? 'completed'),
+    status: getToolStepStatus(
+      toolCalls,
+      step?.status === 'running'
+        ? 'running'
+        : step?.status === 'failed'
+          ? 'failed'
+          : 'completed'
+    ),
     startedAt: step?.startedAt,
     completedAt: step?.completedAt,
     durationMs: step?.durationMs ?? fallbackDuration,
@@ -445,7 +459,7 @@ function getSelectedAssistantMessage(messages: Message[], selectedMessageId?: st
 function StepMarker({ status }: { status: StepStatus }) {
   if (status === 'running') {
     return (
-      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-50/80 text-blue-600">
+      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-50/80 text-blue-600 dark:bg-blue-950/80 dark:text-blue-400">
         <Loader2 className="h-3 w-3 animate-spin" />
       </span>
     );
@@ -463,66 +477,305 @@ function StepMarker({ status }: { status: StepStatus }) {
   );
 }
 
+const SEARCH_TOOLS = new Set(['web_search', 'paper_search']);
+
+function getToolCategory(toolName: string): 'search' | 'video' | 'file' | 'shell' | 'other' {
+  if (SEARCH_TOOLS.has(toolName)) return 'search';
+  if (toolName.startsWith('video_')) return 'video';
+  if (toolName === 'file_reader' || toolName === 'file_writer') return 'file';
+  if (toolName === 'bash_executor') return 'shell';
+  return 'other';
+}
+
+function getParamSummary(toolCall: ToolCallStatus): Array<{ label: string; value: string }> {
+  const params = toolCall.params ?? {};
+  const entries: Array<{ label: string; value: string }> = [];
+  const category = getToolCategory(toolCall.toolName);
+
+  if (category === 'video') {
+    if (params.url) entries.push({ label: 'URL', value: String(params.url) });
+    if (params.format) entries.push({ label: 'Format', value: String(params.format) });
+    if (params.container) entries.push({ label: 'Container', value: String(params.container) });
+    if (params.quality) entries.push({ label: 'Quality', value: String(params.quality) });
+    if (params.language) entries.push({ label: 'Language', value: String(params.language) });
+    if (params.filename) entries.push({ label: 'Filename', value: String(params.filename) });
+    if (params.includeFormats != null) entries.push({ label: 'Include Formats', value: String(params.includeFormats) });
+    if (params.includeTimestamps != null) entries.push({ label: 'Timestamps', value: String(params.includeTimestamps) });
+  } else if (category === 'file') {
+    if (params.path) entries.push({ label: 'Path', value: String(params.path) });
+    if (params.filename) entries.push({ label: 'Filename', value: String(params.filename) });
+    if (params.encoding) entries.push({ label: 'Encoding', value: String(params.encoding) });
+  } else if (category === 'shell') {
+    if (params.command) entries.push({ label: 'Command', value: String(params.command) });
+    if (params.workingDirectory) entries.push({ label: 'Working Dir', value: String(params.workingDirectory) });
+  } else if (category === 'other') {
+    // PPT generator and others: show first few meaningful params
+    for (const [key, val] of Object.entries(params)) {
+      if (val != null && typeof val !== 'object') {
+        entries.push({ label: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), value: String(val) });
+      }
+      if (entries.length >= 4) break;
+    }
+  }
+
+  return entries;
+}
+
+function getResultSummary(toolCall: ToolCallStatus): string | null {
+  if (toolCall.status === 'running') return null;
+  if (toolCall.error) return `Error: ${toolCall.error}`;
+  const output = toolCall.result?.output;
+  if (!output) return null;
+  // Truncate long output for summary display
+  if (output.length > 500) return output.slice(0, 500) + '...';
+  return output;
+}
+
 function ToolStepContent({ step, mode }: { step: TimelineStep; mode: TraceMode }) {
   const [queriesExpanded, setQueriesExpanded] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [paramsExpanded, setParamsExpanded] = useState(false);
+  const [resultExpanded, setResultExpanded] = useState(false);
 
-  return (
-    <div className="space-y-2">
-      {step.queries.length > 0 ? (
-        <div className="space-y-1">
+  const toolNames = new Set(step.toolCalls.map((c) => c.toolName));
+  const isSearchStep = step.toolCalls.length > 0 && [...toolNames].every((name) => SEARCH_TOOLS.has(name));
+
+  // Search tools: show queries + sources (original behavior)
+  if (isSearchStep) {
+    return (
+      <div className="space-y-2">
+        {step.queries.length > 0 ? (
+          <div className="space-y-1">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between py-1 text-left transition-colors hover:text-foreground"
+              onClick={() => setQueriesExpanded((prev) => !prev)}
+              aria-expanded={queriesExpanded}
+              aria-controls={`${step.id}-queries`}
+            >
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {step.queries.length === 1 ? 'Query' : `Queries (${step.queries.length})`}
+              </span>
+              <ChevronDown
+                className={cn(
+                  'h-3.5 w-3.5 text-muted-foreground transition-transform',
+                  queriesExpanded && 'rotate-180'
+                )}
+              />
+            </button>
+            {queriesExpanded ? (
+              <div id={`${step.id}-queries`} className="space-y-1 border-l border-border/50 pl-2">
+                {step.queries.map((query) => (
+                  <div key={query} className="py-0.5 text-xs text-foreground">
+                    {query}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="space-y-1.5" data-testid="reasoning-tool-sources">
           <button
             type="button"
             className="flex w-full items-center justify-between py-1 text-left transition-colors hover:text-foreground"
-            onClick={() => setQueriesExpanded((prev) => !prev)}
-            aria-expanded={queriesExpanded}
-            aria-controls={`${step.id}-queries`}
+            onClick={() => setSourcesExpanded((prev) => !prev)}
+            aria-expanded={sourcesExpanded}
+            aria-controls={`${step.id}-sources`}
           >
             <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              {step.queries.length === 1 ? 'Query' : `Queries (${step.queries.length})`}
+              Sources ({step.sources.length})
             </span>
             <ChevronDown
               className={cn(
                 'h-3.5 w-3.5 text-muted-foreground transition-transform',
-                queriesExpanded && 'rotate-180'
+                sourcesExpanded && 'rotate-180'
               )}
             />
           </button>
-          {queriesExpanded ? (
-            <div id={`${step.id}-queries`} className="space-y-1 border-l border-border/50 pl-2">
-              {step.queries.map((query) => (
-                <div key={query} className="py-0.5 text-xs text-foreground">
-                  {query}
+          {sourcesExpanded ? (
+            <div id={`${step.id}-sources`} className="border-l border-border/50 pl-2">
+              {step.sources.length === 0 ? (
+                <div className="text-xs text-muted-foreground">No sources detected.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {step.sources.map((source) => {
+                    const published = formatPublishedAt(source.publishedAt);
+                    return (
+                      <a
+                        key={source.url}
+                        href={source.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-2 py-1 transition-colors hover:opacity-90"
+                      >
+                        <SourceFavicon url={source.url} />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium text-foreground">
+                            {source.title}
+                          </div>
+                          <div className="truncate text-[11px] text-muted-foreground">{source.domain}</div>
+                        </div>
+                        {published ? (
+                          <div className="shrink-0 text-[10px] text-muted-foreground">{published}</div>
+                        ) : null}
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {mode === 'debug' && step.toolCalls.length > 0 ? (
+          <details className="mt-2 border-t border-border/50 pt-2">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+              Debug Details
+            </summary>
+            <div className="mt-2 space-y-2.5">
+              {step.toolCalls.map((toolCall) => (
+                <div key={toolCall.toolCallId} className="space-y-1.5 py-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-medium text-foreground">{formatToolName(toolCall.toolName)}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {typeof toolCall.result?.duration === 'number'
+                        ? `Latency ${formatDuration(toolCall.result.duration)}`
+                        : toolCall.status}
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[11px] font-medium text-muted-foreground">Request Params</div>
+                  <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/25 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+                    {JSON.stringify(toolCall.params ?? {}, null, 2)}
+                  </pre>
+                  <div className="mt-2 text-[11px] font-medium text-muted-foreground">Raw Output</div>
+                  <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/25 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+                    {toolCall.result?.output || toolCall.error || 'No output.'}
+                  </pre>
                 </div>
               ))}
+            </div>
+          </details>
+        ) : null}
+      </div>
+    );
+  }
+
+  // Non-search tools: show Parameters + Result Output
+  const allParamSummaries = step.toolCalls.map((tc) => ({ toolCall: tc, params: getParamSummary(tc) }));
+  const allResults = step.toolCalls.map((tc) => ({ toolCall: tc, summary: getResultSummary(tc) }));
+  const hasParams = allParamSummaries.some((p) => p.params.length > 0);
+  const hasResult = allResults.some((r) => r.summary !== null);
+
+  return (
+    <div className="space-y-2">
+      {/* Parameters section */}
+      {hasParams ? (
+        <div className="space-y-1">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between py-1 text-left transition-colors hover:text-foreground"
+            onClick={() => setParamsExpanded((prev) => !prev)}
+            aria-expanded={paramsExpanded}
+            aria-controls={`${step.id}-params`}
+          >
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Parameters
+            </span>
+            <ChevronDown
+              className={cn(
+                'h-3.5 w-3.5 text-muted-foreground transition-transform',
+                paramsExpanded && 'rotate-180'
+              )}
+            />
+          </button>
+          {paramsExpanded ? (
+            <div id={`${step.id}-params`} className="border-l border-border/50 pl-2">
+              {allParamSummaries.map(({ toolCall, params }) =>
+                params.length > 0 ? (
+                  <div key={toolCall.toolCallId} className="space-y-1 py-1">
+                    {step.toolCalls.length > 1 ? (
+                      <div className="text-[11px] font-medium text-foreground">{formatToolName(toolCall.toolName)}</div>
+                    ) : null}
+                    {params.map(({ label, value }) => (
+                      <div key={label} className="flex items-start gap-2 text-xs">
+                        <span className="shrink-0 text-muted-foreground">{label}:</span>
+                        <span className="min-w-0 break-all text-foreground">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null
+              )}
             </div>
           ) : null}
         </div>
       ) : null}
 
-      <div className="space-y-1.5" data-testid="reasoning-tool-sources">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between py-1 text-left transition-colors hover:text-foreground"
-          onClick={() => setSourcesExpanded((prev) => !prev)}
-          aria-expanded={sourcesExpanded}
-          aria-controls={`${step.id}-sources`}
-        >
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Sources ({step.sources.length})
-          </span>
-          <ChevronDown
-            className={cn(
-              'h-3.5 w-3.5 text-muted-foreground transition-transform',
-              sourcesExpanded && 'rotate-180'
-            )}
-          />
-        </button>
-        {sourcesExpanded ? (
-          <div id={`${step.id}-sources`} className="border-l border-border/50 pl-2">
-            {step.sources.length === 0 ? (
-              <div className="text-xs text-muted-foreground">No sources detected.</div>
-            ) : (
+      {/* Result section */}
+      {hasResult ? (
+        <div className="space-y-1">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between py-1 text-left transition-colors hover:text-foreground"
+            onClick={() => setResultExpanded((prev) => !prev)}
+            aria-expanded={resultExpanded}
+            aria-controls={`${step.id}-result`}
+          >
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Result
+            </span>
+            <ChevronDown
+              className={cn(
+                'h-3.5 w-3.5 text-muted-foreground transition-transform',
+                resultExpanded && 'rotate-180'
+              )}
+            />
+          </button>
+          {resultExpanded ? (
+            <div id={`${step.id}-result`} className="border-l border-border/50 pl-2">
+              {allResults.map(({ toolCall, summary }) =>
+                summary ? (
+                  <div key={toolCall.toolCallId} className="py-1">
+                    {step.toolCalls.length > 1 ? (
+                      <div className="mb-1 text-[11px] font-medium text-foreground">{formatToolName(toolCall.toolName)}</div>
+                    ) : null}
+                    <pre className={cn(
+                      'max-h-48 overflow-auto rounded bg-muted/25 p-2 text-[11px] whitespace-pre-wrap break-all',
+                      toolCall.error ? 'text-destructive' : 'text-muted-foreground'
+                    )}>
+                      {summary}
+                    </pre>
+                  </div>
+                ) : null
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Sources section - only show if there are actual sources */}
+      {step.sources.length > 0 ? (
+        <div className="space-y-1.5" data-testid="reasoning-tool-sources">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between py-1 text-left transition-colors hover:text-foreground"
+            onClick={() => setSourcesExpanded((prev) => !prev)}
+            aria-expanded={sourcesExpanded}
+            aria-controls={`${step.id}-sources`}
+          >
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Sources ({step.sources.length})
+            </span>
+            <ChevronDown
+              className={cn(
+                'h-3.5 w-3.5 text-muted-foreground transition-transform',
+                sourcesExpanded && 'rotate-180'
+              )}
+            />
+          </button>
+          {sourcesExpanded ? (
+            <div id={`${step.id}-sources`} className="border-l border-border/50 pl-2">
               <div className="space-y-1.5">
                 {step.sources.map((source) => {
                   const published = formatPublishedAt(source.publishedAt);
@@ -549,11 +802,12 @@ function ToolStepContent({ step, mode }: { step: TimelineStep; mode: TraceMode }
                   );
                 })}
               </div>
-            )}
-          </div>
-        ) : null}
-      </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
+      {/* Debug details - always available in debug mode */}
       {mode === 'debug' && step.toolCalls.length > 0 ? (
         <details className="mt-2 border-t border-border/50 pt-2">
           <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
@@ -571,11 +825,11 @@ function ToolStepContent({ step, mode }: { step: TimelineStep; mode: TraceMode }
                   </div>
                 </div>
                 <div className="mt-2 text-[11px] font-medium text-muted-foreground">Request Params</div>
-                <pre className="mt-1 max-h-48 overflow-auto bg-muted/25 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+                <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/25 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
                   {JSON.stringify(toolCall.params ?? {}, null, 2)}
                 </pre>
                 <div className="mt-2 text-[11px] font-medium text-muted-foreground">Raw Output</div>
-                <pre className="mt-1 max-h-48 overflow-auto bg-muted/25 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
+                <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/25 p-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
                   {toolCall.result?.output || toolCall.error || 'No output.'}
                 </pre>
               </div>
@@ -617,7 +871,14 @@ export function ReasoningTrace({ sessionId, selectedMessageId }: ReasoningTraceP
     : sessionReasoningSteps.length > 0
       ? sessionId
       : fallbackMessageKey ?? sessionId;
-  const reasoningSteps = (reasoningMap.get(reasoningKey) || []) as ReasoningStepEntry[];
+  const reasoningSteps = ((reasoningMap.get(reasoningKey) || []) as ReasoningStepEntry[])
+    .slice()
+    .sort((a, b) => {
+      const aIndex = a.stepIndex ?? Number.MAX_SAFE_INTEGER;
+      const bIndex = b.stepIndex ?? Number.MAX_SAFE_INTEGER;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      return a.startedAt - b.startedAt;
+    });
 
   const toolCalls = useMemo(
     () =>

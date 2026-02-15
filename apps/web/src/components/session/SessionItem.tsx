@@ -43,8 +43,8 @@ export function SessionItem({ session, isActive }: SessionItemProps) {
   return (
     <div
       className={cn(
-        'group relative flex cursor-pointer flex-col gap-1 rounded-lg border p-3 transition-colors hover:bg-accent',
-        isActive && 'bg-accent border-primary'
+        'group relative flex cursor-pointer flex-col gap-1 rounded-lg border border-transparent p-3 transition-all duration-200 hover:bg-accent hover:border-border',
+        isActive && 'bg-accent border-border dark:border-blue-500/30 dark:bg-blue-500/5'
       )}
       onClick={handleClick}
     >

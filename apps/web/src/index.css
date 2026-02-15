@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    --chat-content-max-width: 1400px;
     --background: 0 0% 100%;
     --foreground: 0 0% 3.9%;
     --card: 0 0% 100%;
@@ -31,26 +32,33 @@
     --chart-5: 27 87% 67%;
   }
 
+  /* Dark mode: ChatGPT-aligned palette (#212121 base)
+   * Text hierarchy:
+   *   --text-primary   #ECECF1  → --foreground (main content)
+   *   --text-secondary  #C5C5D2  → --secondary-foreground / --card-foreground
+   *   --text-muted      #8E8EA0  → --muted-foreground (timestamps, disabled)
+   * No pure white (#FFF) for body text.
+   */
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
+    --background: 0 0% 13%;
+    --foreground: 240 14% 93.5%;
+    --card: 0 0% 15%;
+    --card-foreground: 240 14% 93.5%;
+    --popover: 0 0% 15%;
+    --popover-foreground: 240 14% 93.5%;
+    --primary: 240 14% 93.5%;
+    --primary-foreground: 0 0% 13%;
+    --secondary: 0 0% 17%;
+    --secondary-foreground: 240 14% 79.8%;
+    --muted: 0 0% 17%;
+    --muted-foreground: 240 10% 59.2%;
+    --accent: 0 0% 17%;
+    --accent-foreground: 240 14% 93.5%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    --border: 0 0% 22%;
+    --input: 0 0% 19%;
+    --ring: 217 91% 60%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -65,6 +73,8 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
@@ -75,4 +85,68 @@
   .prose > .not-prose + p {
     margin-top: 1rem !important;
   }
+}
+
+/* Dark mode scrollbar */
+.dark ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: hsl(0 0% 13%);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: hsl(0 0% 24%);
+  border-radius: 5px;
+  border: 2px solid hsl(0 0% 13%);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: hsl(0 0% 30%);
+}
+.dark * {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(0 0% 24%) hsl(0 0% 13%);
+}
+
+/* Dark mode chat input pill – ensure dark background and white text when .dark is set */
+.dark .chat-input-pill {
+  background-color: #1e1e1e !important;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+.dark .chat-input-pill textarea {
+  color: #ECECF1 !important;
+}
+.dark .chat-input-pill textarea::placeholder {
+  color: #8E8EA0 !important;
+}
+.dark .chat-input-pill [data-testid="chat-input"] {
+  color: #ECECF1 !important;
+}
+.dark .chat-input-pill button[data-chat-input-icon] {
+  color: #C5C5D2;
+}
+.dark .chat-input-pill button[data-chat-input-icon]:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ECECF1;
+}
+
+/* Dark mode prose (markdown) overrides */
+.dark .prose {
+  --tw-prose-body: #C5C5D2;           /* --text-secondary for body text */
+  --tw-prose-headings: #ECECF1;        /* --text-primary for headings */
+  --tw-prose-lead: #C5C5D2;           /* --text-secondary */
+  --tw-prose-links: hsl(217 91% 72%);
+  --tw-prose-bold: #ECECF1;            /* --text-primary for emphasis */
+  --tw-prose-counters: #8E8EA0;        /* --text-muted */
+  --tw-prose-bullets: #8E8EA0;         /* --text-muted */
+  --tw-prose-hr: hsl(0 0% 20%);
+  --tw-prose-quotes: #C5C5D2;         /* --text-secondary */
+  --tw-prose-quote-borders: hsl(0 0% 25%);
+  --tw-prose-captions: #8E8EA0;        /* --text-muted */
+  --tw-prose-code: #ECECF1;            /* --text-primary for code */
+  --tw-prose-pre-code: #C5C5D2;       /* --text-secondary */
+  --tw-prose-pre-bg: hsl(0 0% 14%);
+  --tw-prose-th-borders: hsl(0 0% 25%);
+  --tw-prose-td-borders: hsl(0 0% 20%);
 }

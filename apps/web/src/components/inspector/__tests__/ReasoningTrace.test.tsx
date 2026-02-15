@@ -536,4 +536,74 @@ describe('ReasoningTrace (Inspector)', () => {
     const toolSteps = screen.getAllByText(/Step \d+: Tool Step/i);
     expect(toolSteps).toHaveLength(1);
   });
+
+  it('renders in deterministic step_index order regardless of insertion order', () => {
+    const sessionId = 'session-step-index-order';
+    const now = Date.now();
+
+    useChatStore.setState({
+      messages: new Map([
+        [
+          sessionId,
+          [
+            {
+              id: 'assistant-order',
+              sessionId,
+              role: 'assistant',
+              content: 'answer',
+              createdAt: new Date(now),
+            },
+          ],
+        ],
+      ]),
+      reasoningSteps: new Map([
+        [
+          sessionId,
+          [
+            {
+              stepId: 'step-2',
+              stepIndex: 2,
+              label: 'Searching',
+              status: 'completed',
+              startedAt: now - 1500,
+              completedAt: now - 1200,
+              durationMs: 300,
+            },
+            {
+              stepId: 'step-1',
+              stepIndex: 1,
+              label: 'Analyzing',
+              status: 'completed',
+              startedAt: now - 2000,
+              completedAt: now - 1700,
+              durationMs: 300,
+            },
+          ],
+        ],
+      ]),
+      toolCalls: new Map([
+        [
+          'tool-2',
+          {
+            sessionId,
+            toolCallId: 'tool-2',
+            toolName: 'web_search',
+            status: 'completed',
+            params: { query: 'ordering test' },
+            result: {
+              success: true,
+              output: 'https://example.com',
+              duration: 10,
+              artifacts: [],
+            },
+          },
+        ],
+      ]),
+    });
+
+    render(<ReasoningTrace sessionId={sessionId} />);
+    const titles = screen.getAllByText(/Step \d+:/i).map((el) => el.textContent);
+    expect(titles[0]).toContain('Step 1: Reasoning');
+    expect(titles[1]).toContain('Step 2: Tool Step');
+  });
 });

@@ -6,7 +6,9 @@ import { ChatInput } from './ChatInput';
 import { apiClient, type SSEEvent, ApiError } from '../../lib/api';
 import { useChatStore } from '../../stores/chatStore';
 import { useSession } from '../../hooks/useSessions';
+import { useChatLayout } from '../../hooks/useChatLayout';
 import { useToast } from '../../hooks/use-toast';
+import { isHiddenArtifactName } from '../../lib/artifactFilters';
 import {
   getBrowserActionStepByIndex,
   getVisitStepByIndex,
@@ -61,6 +63,8 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const location = useLocation();
   const [isSending, setIsSending] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Ensure chat layout width is applied so ChatInput and DocumentRenderer share the same max-width
+  useChatLayout();
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialMessageHandledRef = useRef(false);
   const queryClient = useQueryClient();
@@ -90,9 +94,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const clearTables = useChatStore((state) => state.clearTables);
   const clearToolCalls = useChatStore((state) => state.clearToolCalls);
   const clearPptPipeline = useChatStore((state) => state.clearPptPipeline);
-  const addReasoningStep = useChatStore((state) => state.addReasoningStep);
-  const updateReasoningStep = useChatStore((state) => state.updateReasoningStep);
-  const completeReasoningStep = useChatStore((state) => state.completeReasoningStep);
+  const applyReasoningEvent = useChatStore((state) => state.applyReasoningEvent);
   const clearReasoningSteps = useChatStore((state) => state.clearReasoningSteps);
   const setInspectorTab = useChatStore((state) => state.setInspectorTab);
   const setInspectorOpen = useChatStore((state) => state.setInspectorOpen);
@@ -317,8 +319,14 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
 
       case 'tool.complete':
         if (event.data) {
-          if (Array.isArray(event.data.artifacts)) {
-            for (const artifact of event.data.artifacts) {
+          const visibleArtifacts = Array.isArray(event.data.artifacts)
+            ? event.data.artifacts.filter(
+                (artifact: any) => !isHiddenArtifactName(artifact?.name)
+              )
+            : [];
+
+          if (visibleArtifacts.length > 0) {
+            for (const artifact of visibleArtifacts) {
               if (!artifact?.name) continue;
               addFileArtifact(sessionId, {
                 type: artifact.type || 'file',
@@ -363,13 +371,12 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
             success: true,
             output: event.data.result || '',
             duration: event.data.duration || 0,
-            artifacts: event.data.artifacts,
+            artifacts: visibleArtifacts,
             previewSnapshots: Array.isArray(event.data.previewSnapshots)
               ? event.data.previewSnapshots
               : undefined,
           };
           completeToolCall(sessionId, event.data.toolCallId, toolResult);
-          completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
         }
         break;
 
@@ -398,63 +405,37 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
             duration: event.data.duration || 0,
           };
           completeToolCall(sessionId, event.data.toolCallId, toolResult);
-          completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
         }
         break;
 
       case 'reasoning.step':
         if (event.data) {
-          const existingSteps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
-          const alreadyTracked = existingSteps.some((s) => s.stepId === event.data.stepId);
-          const thinkingContent = event.data.thinkingContent;
-
-          if (event.data.status === 'running') {
-            if (!alreadyTracked) {
-              addReasoningStep(sessionId, {
-                stepId: event.data.stepId,
-                label: event.data.label,
-                status: 'running',
-                startedAt: Date.now(),
-                message: event.data.message,
-                thinkingContent,
-                details: event.data.details,
-              });
-            } else {
-              updateReasoningStep(sessionId, event.data.stepId, {
-                label: event.data.label,
-                status: 'running',
-                message: event.data.message,
-                ...(thinkingContent ? { thinkingContent } : {}),
-                details: event.data.details,
-              });
-            }
-          }
-
-          if (event.data.status === 'completed') {
-            if (!alreadyTracked) {
-              addReasoningStep(sessionId, {
-                stepId: event.data.stepId,
-                label: event.data.label,
-                status: 'completed',
-                startedAt: Date.now(),
-                completedAt: Date.now(),
-                durationMs: event.data.durationMs,
-                message: event.data.message,
-                thinkingContent,
-                details: event.data.details,
-              });
-            } else {
-              updateReasoningStep(sessionId, event.data.stepId, {
-                label: event.data.label,
-                status: 'completed',
-                completedAt: Date.now(),
-                durationMs: event.data.durationMs,
-                message: event.data.message,
-                ...(thinkingContent ? { thinkingContent } : {}),
-                details: event.data.details,
-              });
-            }
-          }
+          const timestamp =
+            typeof event.timestamp === 'number' ? event.timestamp : Date.now();
+          const currentSteps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
+          const knownStep = currentSteps.find((step) => step.stepId === event.data.stepId);
+          const fallbackStepIndex =
+            knownStep?.stepIndex ??
+            (Math.max(0, ...currentSteps.map((step) => step.stepIndex ?? 0)) + 1);
+          const lifecycle =
+            event.data.lifecycle ??
+            (event.data.status === 'running' ? 'STARTED' : 'FINISHED');
+          applyReasoningEvent(sessionId, {
+            eventId:
+              event.data.eventId ??
+              `${event.data.stepId}:${event.data.eventSeq ?? 0}:${timestamp}`,
+            traceId: event.data.traceId ?? sessionId,
+            stepId: event.data.stepId,
+            stepIndex: Number(event.data.stepIndex ?? fallbackStepIndex),
+            eventSeq: Number(event.data.eventSeq ?? 0),
+            lifecycle,
+            timestamp,
+            label: event.data.label,
+            message: event.data.message,
+            thinkingContent: event.data.thinkingContent,
+            details: event.data.details,
+            finalStatus: event.data.finalStatus,
+          });
         }
         break;
 
@@ -1041,7 +1022,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 flex-col overflow-hidden dark:bg-[#212121]">
       <DocumentCanvas sessionId={sessionId} scrollContainerRef={scrollContainerRef} />
 
       {/* Input always at the bottom */}

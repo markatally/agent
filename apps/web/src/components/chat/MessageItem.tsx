@@ -91,7 +91,7 @@ const markdownComponents: Components = {
   thead({ children, ...props }) {
     return (
       <thead
-        className="bg-muted/50 border-b border-border"
+        className="bg-muted/50 border-b border-border dark:bg-muted/30"
         {...props}
       >
         {children}
@@ -129,7 +129,7 @@ const markdownComponents: Components = {
     return (
       <th
         className={cn(
-          'px-4 py-3 font-semibold text-foreground whitespace-nowrap',
+          'px-4 py-3 font-medium text-foreground dark:text-muted-foreground dark:font-semibold whitespace-nowrap text-xs uppercase tracking-wider',
           alignClass
         )}
         {...props}
@@ -293,7 +293,7 @@ export function MessageItem({ message, isStreaming }: MessageItemProps) {
     return (
       <div className="flex justify-end px-4 py-2">
         <div className="flex w-fit max-w-[80%] flex-col items-end gap-1">
-          <div className="rounded-2xl bg-muted/60 px-4 py-2.5 text-sm text-black dark:text-white">
+          <div className="rounded-2xl bg-muted/60 px-4 py-2.5 text-sm text-foreground dark:bg-[#2F2F2F] dark:text-[#ECECF1]">
             {message.content}
           </div>
           <div className="flex items-center justify-end gap-1 pr-1">

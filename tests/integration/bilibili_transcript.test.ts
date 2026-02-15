@@ -43,29 +43,15 @@ async function isYtDlpAvailable(): Promise<boolean> {
   }
 }
 
-function assertTranscriptPayload(payload: any) {
-  // Transcript should have meaningful content
-  expect(payload.segmentCount).toBeGreaterThan(10);
-  expect(payload.transcript.length).toBeGreaterThan(500);
+function extractSegmentCount(output: string): number {
+  const match = output.match(/Segments:\s+(\d+)/);
+  return match ? Number(match[1]) : 0;
+}
 
-  // Verify timestamps are present
-  expect(payload.includeTimestamps).toBe(true);
-  expect(payload.transcript).toMatch(/\[\d{2}:\d{2}:\d{2}/);
-
-  // Verify Chinese content (the video is about Claude Skills)
-  expect(payload.transcript).toMatch(/[一-龥]/);
-
-  // Verify segments have proper structure
-  expect(payload.segments).toBeInstanceOf(Array);
-  expect(payload.segments.length).toBeGreaterThan(10);
-  for (const segment of payload.segments.slice(0, 5)) {
-    expect(segment).toHaveProperty('start');
-    expect(segment).toHaveProperty('end');
-    expect(segment).toHaveProperty('text');
-    expect(segment.start).toMatch(/\d{2}:\d{2}:\d{2}/);
-    expect(segment.end).toMatch(/\d{2}:\d{2}:\d{2}/);
-    expect(segment.text.length).toBeGreaterThan(0);
-  }
+function assertTranscriptText(content: string) {
+  expect(content.length).toBeGreaterThan(500);
+  expect(content).toMatch(/\[\d{2}:\d{2}:\d{2}/);
+  expect(content).toMatch(/[一-龥]/);
 }
 
 afterAll(async () => {
@@ -106,21 +92,18 @@ describe('Bilibili Transcript Extraction (Integration)', () => {
 
     expect(result.success).toBe(true);
     expect(result.output).toContain('Transcript extraction completed.');
-    expect(result.artifacts?.length).toBe(2);
-
-    const dataArtifact = result.artifacts?.find((a) => a.name === 'video-transcript.json');
-    const payload = JSON.parse(String(dataArtifact?.content || '{}'));
-    assertTranscriptPayload(payload);
+    expect(result.artifacts?.length).toBe(1);
+    expect(extractSegmentCount(result.output)).toBeGreaterThan(10);
 
     // Verify file written to disk
     const transcriptPath = path.join(TRANSCRIPT_DIR, 'bilibili-integration-explicit.transcript.txt');
     const fileContent = await fs.readFile(transcriptPath, 'utf8');
-    expect(fileContent.length).toBeGreaterThan(500);
+    assertTranscriptText(fileContent);
 
     expect(progressMessages.length).toBeGreaterThan(0);
 
     console.log('\n--- Explicit Cookies Test ---');
-    console.log(`Segments: ${payload.segmentCount}, Source: ${payload.source}`);
+    console.log(`Segments: ${extractSegmentCount(result.output)}`);
   }, 120000);
 
   it('auto-retries with browser cookies when no cookies provided (real user scenario)', async () => {
@@ -153,11 +136,8 @@ describe('Bilibili Transcript Extraction (Integration)', () => {
 
     expect(result.success).toBe(true);
     expect(result.output).toContain('Transcript extraction completed.');
-    expect(result.artifacts?.length).toBe(2);
-
-    const dataArtifact = result.artifacts?.find((a) => a.name === 'video-transcript.json');
-    const payload = JSON.parse(String(dataArtifact?.content || '{}'));
-    assertTranscriptPayload(payload);
+    expect(result.artifacts?.length).toBe(1);
+    expect(extractSegmentCount(result.output)).toBeGreaterThan(10);
 
     // Verify the auto-retry progress message was emitted
     expect(progressMessages.some((m) => /retry.*cookie/i.test(m))).toBe(true);
@@ -165,18 +145,19 @@ describe('Bilibili Transcript Extraction (Integration)', () => {
     // Verify file written to disk
     const transcriptPath = path.join(TRANSCRIPT_DIR, 'bilibili-integration-autoretry.transcript.txt');
     const fileContent = await fs.readFile(transcriptPath, 'utf8');
-    expect(fileContent.length).toBeGreaterThan(500);
+    assertTranscriptText(fileContent);
 
     console.log('\n--- Auto-Retry (No Cookies) Test ---');
-    console.log(`Segments: ${payload.segmentCount}, Source: ${payload.source}`);
+    console.log(`Segments: ${extractSegmentCount(result.output)}`);
     console.log(`Progress messages: ${progressMessages.join(' → ')}`);
-    console.log('First 3 segments:');
-    for (const seg of payload.segments.slice(0, 3)) {
-      console.log(`  [${seg.start} --> ${seg.end}] ${seg.text}`);
+    const preview = fileContent.split('\n').filter(Boolean);
+    console.log('First 3 lines:');
+    for (const line of preview.slice(0, 3)) {
+      console.log(`  ${line}`);
     }
-    console.log('Last 3 segments:');
-    for (const seg of payload.segments.slice(-3)) {
-      console.log(`  [${seg.start} --> ${seg.end}] ${seg.text}`);
+    console.log('Last 3 lines:');
+    for (const line of preview.slice(-3)) {
+      console.log(`  ${line}`);
     }
   }, 120000);
 });

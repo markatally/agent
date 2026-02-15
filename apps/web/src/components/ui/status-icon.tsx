@@ -42,7 +42,7 @@ export function StatusIcon({ status, size = 'md', className }: StatusIconProps) 
     return (
       <span
         className={cn(
-          'inline-flex shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-50/50 text-blue-600',
+          'inline-flex shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-50/50 text-blue-600 dark:border-blue-700 dark:bg-blue-950/50 dark:text-blue-400',
           styles.circle,
           className
         )}

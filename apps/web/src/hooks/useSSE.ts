@@ -3,6 +3,7 @@ import { SSEClient, type StreamEvent } from '../lib/sse';
 import { useChatStore } from '../stores/chatStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/api';
+import { isHiddenArtifactName } from '../lib/artifactFilters';
 
 interface UseSSEOptions {
   sessionId: string;
@@ -30,9 +31,7 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
   const updateToolCallProgress = useChatStore((state) => state.updateToolCallProgress);
   const completeToolCall = useChatStore((state) => state.completeToolCall);
   const associateToolCallsWithMessage = useChatStore((state) => state.associateToolCallsWithMessage);
-  const addReasoningStep = useChatStore((state) => state.addReasoningStep);
-  const updateReasoningStep = useChatStore((state) => state.updateReasoningStep);
-  const completeReasoningStep = useChatStore((state) => state.completeReasoningStep);
+  const applyReasoningEvent = useChatStore((state) => state.applyReasoningEvent);
   const clearReasoningSteps = useChatStore((state) => state.clearReasoningSteps);
   const addFileArtifact = useChatStore((state) => state.addFileArtifact);
   const stopStreaming = useChatStore((state) => state.stopStreaming);
@@ -112,22 +111,6 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
                 event.data.params || event.data.parameters
               );
 
-              const toolStepId = `tool-${event.data.toolCallId}`;
-              const existingSteps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
-              const alreadyTracked = existingSteps.some((step) => step.stepId === toolStepId);
-              if (!alreadyTracked) {
-                const isSearch = ['web_search', 'paper_search'].includes(event.data.toolName);
-                addReasoningStep(sessionId, {
-                  stepId: toolStepId,
-                  label: isSearch ? 'Searching' : 'Executing tool',
-                  status: 'running',
-                  startedAt: Date.now(),
-                  message: isSearch ? 'Running search...' : `Running ${event.data.toolName}...`,
-                  details: {
-                    toolName: event.data.toolName,
-                  },
-                });
-              }
             }
             break;
 
@@ -145,14 +128,18 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
 
           case 'tool.complete':
             if (event.data) {
+              const visibleArtifacts = Array.isArray(event.data.artifacts)
+                ? event.data.artifacts.filter(
+                    (artifact: any) => !isHiddenArtifactName(artifact?.name)
+                  )
+                : undefined;
               const toolResult: import('@mark/shared').ToolResult = {
                 success: true,
                 output: event.data.result || '',
                 duration: event.data.duration || 0,
-                artifacts: event.data.artifacts,
+                artifacts: visibleArtifacts,
               };
               completeToolCall(sessionId, event.data.toolCallId, toolResult);
-              completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
             }
             break;
 
@@ -165,62 +152,37 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
                 duration: event.data.duration || 0,
               };
               completeToolCall(sessionId, event.data.toolCallId, toolResult);
-              completeReasoningStep(sessionId, `tool-${event.data.toolCallId}`, Date.now());
             }
             break;
 
           case 'reasoning.step':
             if (event.data) {
-              const existingSteps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
-              const alreadyTracked = existingSteps.some((step) => step.stepId === event.data.stepId);
-              const thinkingContent = event.data.thinkingContent;
-              if (event.data.status === 'running') {
-                if (!alreadyTracked) {
-                  addReasoningStep(sessionId, {
-                    stepId: event.data.stepId,
-                    label: event.data.label,
-                    status: 'running',
-                    startedAt: Date.now(),
-                    message: event.data.message,
-                    thinkingContent,
-                    details: event.data.details,
-                  });
-                } else {
-                  updateReasoningStep(sessionId, event.data.stepId, {
-                    label: event.data.label,
-                    status: 'running',
-                    message: event.data.message,
-                    ...(thinkingContent ? { thinkingContent } : {}),
-                    details: event.data.details,
-                  });
-                }
-              }
+              const timestamp = typeof event.timestamp === 'number' ? event.timestamp : Date.now();
+              const currentSteps = useChatStore.getState().reasoningSteps.get(sessionId) || [];
+              const knownStep = currentSteps.find((step) => step.stepId === event.data.stepId);
+              const fallbackStepIndex =
+                knownStep?.stepIndex ??
+                (Math.max(0, ...currentSteps.map((step) => step.stepIndex ?? 0)) + 1);
+              const lifecycle =
+                event.data.lifecycle ??
+                (event.data.status === 'running' ? 'STARTED' : 'FINISHED');
 
-              if (event.data.status === 'completed') {
-                if (!alreadyTracked) {
-                  addReasoningStep(sessionId, {
-                    stepId: event.data.stepId,
-                    label: event.data.label,
-                    status: 'completed',
-                    startedAt: Date.now(),
-                    completedAt: Date.now(),
-                    durationMs: event.data.durationMs,
-                    message: event.data.message,
-                    thinkingContent,
-                    details: event.data.details,
-                  });
-                } else {
-                  updateReasoningStep(sessionId, event.data.stepId, {
-                    label: event.data.label,
-                    status: 'completed',
-                    completedAt: Date.now(),
-                    durationMs: event.data.durationMs,
-                    message: event.data.message,
-                    ...(thinkingContent ? { thinkingContent } : {}),
-                    details: event.data.details,
-                  });
-                }
-              }
+              applyReasoningEvent(sessionId, {
+                eventId:
+                  event.data.eventId ??
+                  `${event.data.stepId}:${event.data.eventSeq ?? 0}:${timestamp}`,
+                traceId: event.data.traceId ?? sessionId,
+                stepId: event.data.stepId,
+                stepIndex: Number(event.data.stepIndex ?? fallbackStepIndex),
+                eventSeq: Number(event.data.eventSeq ?? 0),
+                lifecycle,
+                timestamp,
+                label: event.data.label,
+                message: event.data.message,
+                thinkingContent: event.data.thinkingContent,
+                details: event.data.details,
+                finalStatus: event.data.finalStatus,
+              });
             }
             break;
 
@@ -281,9 +243,7 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
     startToolCall,
     updateToolCallProgress,
     completeToolCall,
-    addReasoningStep,
-    updateReasoningStep,
-    completeReasoningStep,
+    applyReasoningEvent,
     clearReasoningSteps,
     addFileArtifact,
     stopStreaming,

@@ -383,10 +383,13 @@ export function useSessionMessages(sessionId: string | undefined) {
         if (message.role === 'assistant' && (message.metadata as any)?.reasoningSteps) {
           const reasoningSteps = (message.metadata as any).reasoningSteps as Array<{
             stepId: string;
+            stepIndex?: number;
+            traceId?: string;
             label: string;
             startedAt: number;
             completedAt: number;
             durationMs: number;
+            finalStatus?: 'SUCCEEDED' | 'FAILED' | 'CANCELED';
             message?: string;
             details?: { queries?: string[]; sources?: string[]; toolName?: string };
             thinkingContent?: string;
@@ -400,8 +403,15 @@ export function useSessionMessages(sessionId: string | undefined) {
           for (const step of reasoningSteps) {
             addReasoningStep(messageKey, {
               stepId: step.stepId,
+              stepIndex: step.stepIndex,
+              traceId: step.traceId,
               label: step.label,
-              status: 'completed',
+              status:
+                step.finalStatus === 'FAILED'
+                  ? 'failed'
+                  : step.finalStatus === 'CANCELED'
+                    ? 'canceled'
+                    : 'completed',
               startedAt: step.startedAt,
               completedAt: step.completedAt,
               durationMs: step.durationMs,

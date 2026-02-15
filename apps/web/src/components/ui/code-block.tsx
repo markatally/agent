@@ -6,7 +6,7 @@ import { cn } from '../../lib/utils';
 
 const PURE_BLACK_STYLE = {
   margin: 0,
-  background: '#000000',
+  background: '#1a1a1a',
   borderRadius: '0.5rem',
   color: '#e6e6e6',
 };

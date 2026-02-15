@@ -19,7 +19,7 @@ export function NewSessionButton() {
 
   return (
     <Button
-      className="w-full"
+      className="w-full dark:bg-card dark:border dark:border-border dark:text-foreground dark:hover:bg-accent"
       onClick={handleCreateSession}
       disabled={createSession.isPending}
       data-testid="new-chat-button"

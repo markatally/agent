@@ -1,4 +1,4 @@
-import { ChevronsUpDown, GripVertical, Loader2, Menu, PanelLeftClose, X } from 'lucide-react';
+import { ChevronsUpDown, GripVertical, Loader2, Menu, Moon, PanelLeftClose, Sun, X } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
@@ -8,6 +8,7 @@ import { Separator } from '../ui/separator';
 import { SessionList } from '../session/SessionList';
 import { NewSessionButton } from '../session/NewSessionButton';
 import { cn } from '../../lib/utils';
+import { useTheme } from '../../hooks/useTheme';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,16 +38,17 @@ interface SidebarProps {
   className?: string;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
-  onOpenSkillsConfig?: () => void;
+  onOpenSettings?: () => void;
 }
 
 export function Sidebar({
   className,
   collapsed = false,
   onToggleCollapse,
-  onOpenSkillsConfig,
+  onOpenSettings,
 }: SidebarProps) {
   const { user, logout } = useAuth();
+  const { resolved: resolvedTheme, toggle: toggleTheme } = useTheme();
   const clearAllSessions = useClearAllSessions();
   const navigate = useNavigate();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
@@ -99,10 +101,10 @@ export function Sidebar({
     setIsMobileOpen(false);
   }, [logout]);
 
-  const handleOpenSkillsConfig = useCallback(() => {
-    onOpenSkillsConfig?.();
+  const handleOpenSettings = useCallback(() => {
+    onOpenSettings?.();
     setIsMobileOpen(false);
-  }, [onOpenSkillsConfig]);
+  }, [onOpenSettings]);
 
   const handleClearAllConversations = useCallback(async () => {
     try {
@@ -132,7 +134,7 @@ export function Sidebar({
         ref={sidebarRef}
         style={{ width: `${collapsed && !isMobileOpen ? 0 : width}px` }}
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex flex-col border-r bg-background transition-transform duration-200 md:relative',
+          'fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-background transition-transform duration-200 md:relative',
           isMobileOpen ? 'translate-x-0' : '-translate-x-full',
           collapsed ? 'md:-translate-x-full md:overflow-hidden' : 'md:translate-x-0',
           isResizing && 'transition-none',
@@ -142,17 +144,31 @@ export function Sidebar({
         {/* Header */}
         <div className="flex h-16 items-center justify-between border-b px-4">
           <h1 className="text-lg font-semibold">Mark Agent</h1>
-          {onToggleCollapse ? (
+          <div className="flex items-center gap-1">
             <Button
               variant="ghost"
               size="icon"
-              className="hidden md:inline-flex"
-              onClick={onToggleCollapse}
-              aria-label="Collapse sidebar"
+              onClick={toggleTheme}
+              aria-label={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             >
-              <PanelLeftClose className="h-4 w-4" />
+              {resolvedTheme === 'dark' ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
             </Button>
-          ) : null}
+            {onToggleCollapse ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hidden md:inline-flex"
+                onClick={onToggleCollapse}
+                aria-label="Collapse sidebar"
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         {/* New Session Button */}
@@ -170,7 +186,7 @@ export function Sidebar({
         <Separator />
 
         {/* User Menu */}
-        <div className="p-4">
+        <div className="p-4 dark:bg-card/50">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -211,8 +227,8 @@ export function Sidebar({
                 )}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleOpenSkillsConfig}>
-                Skills Config
+              <DropdownMenuItem onClick={handleOpenSettings}>
+                Settings
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
