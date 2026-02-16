@@ -664,5 +664,25 @@ describe('chatStore', () => {
       expect(finalSteps.map((step) => step.status)).toEqual(['completed', 'completed', 'failed']);
       expect(finalSteps.every((step) => step.completedAt && step.durationMs !== undefined)).toBe(true);
     });
+
+    it('finalizes lingering running step when task completes', () => {
+      apply({
+        eventId: 'f1',
+        stepId: 'fin-1',
+        stepIndex: 1,
+        eventSeq: 1,
+        lifecycle: 'STARTED',
+      });
+
+      useChatStore.getState().finalizeReasoningTrace(sessionId, nextTs());
+
+      const state = useChatStore.getState();
+      const steps = state.reasoningSteps.get(sessionId) || [];
+      expect(steps).toHaveLength(1);
+      expect(steps[0]?.status).toBe('completed');
+      expect(steps[0]?.completedAt).toBeDefined();
+      expect(state.reasoningActiveStepId.get(sessionId)).toBeNull();
+      expect((state.reasoningPendingEvents.get(sessionId) || []).length).toBe(0);
+    });
   });
 });

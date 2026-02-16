@@ -24,6 +24,9 @@ export class TaskManager {
   // Treat search tools as high-cost - allow at most ONE call per task
   private readonly MAX_SEARCH_CALLS = 1;
   private readonly MAX_CONSECUTIVE_FAILURES = 2;
+  private readonly VIDEO_URL_PATTERN = /https?:\/\/[^\s)]+/gi;
+  private readonly SUMMARY_INTENT_PATTERN =
+    /\b(?:summar(?:y|ize|ise|ized|ised|ization|isation)|recap|overview)\b|总结|分析|概述|复盘|解读|梳理/i;
 
   /**
    * Initialize a task for a session
@@ -65,6 +68,25 @@ export class TaskManager {
    */
   private inferGoal(userMessage: string): TaskGoal {
     const lowerMessage = userMessage.toLowerCase();
+    const urls = userMessage.match(this.VIDEO_URL_PATTERN) || [];
+    const videoUrl = urls.find((url) => this.isLikelyVideoUrl(url));
+    const hasVideoUrl = Boolean(videoUrl);
+
+    const requestsDownload =
+      /\bdownload\b/.test(lowerMessage) ||
+      /\bsave\b/.test(lowerMessage);
+    const requestsTranscript =
+      /\btranscripts?\b/.test(lowerMessage) ||
+      /\btranscribe\b/.test(lowerMessage) ||
+      /\bsubtitles?\b/.test(lowerMessage) ||
+      /\bcaptions?\b/.test(lowerMessage);
+    const requestsVideoSummary =
+      hasVideoUrl &&
+      this.SUMMARY_INTENT_PATTERN.test(userMessage);
+
+    const requiresVideoDownload = hasVideoUrl && requestsDownload;
+    const requiresTranscript = hasVideoUrl && (requestsTranscript || requestsVideoSummary);
+    const requiresVideoProbe = hasVideoUrl && (requiresVideoDownload || requiresTranscript);
 
     // Check if PPT generation is requested
     const requiresPPT =
@@ -74,24 +96,45 @@ export class TaskManager {
       lowerMessage.includes('slides');
 
     // Check if search is requested
-    const requiresSearch =
+    const explicitSearchIntent =
       lowerMessage.includes('search') ||
       lowerMessage.includes('find') ||
       lowerMessage.includes('papers') ||
-      lowerMessage.includes('research') ||
-      lowerMessage.includes('summarize');
+      lowerMessage.includes('research');
+    const summaryIntent = this.SUMMARY_INTENT_PATTERN.test(userMessage);
+    const requiresSearch = explicitSearchIntent || (!hasVideoUrl && summaryIntent);
+
+    const isVideoPipelineRequest =
+      requiresVideoProbe || requiresVideoDownload || requiresTranscript;
 
     // Expected artifacts
     const expectedArtifacts: string[] = [];
     if (requiresPPT) expectedArtifacts.push('ppt');
-    if (requiresSearch) expectedArtifacts.push('search_results');
+    if (requiresSearch && !isVideoPipelineRequest) expectedArtifacts.push('search_results');
+    if (requiresVideoDownload) expectedArtifacts.push('video_file');
+    if (requiresTranscript) expectedArtifacts.push('transcript');
 
     return {
       description: userMessage,
-      requiresPPT,
-      requiresSearch,
+      requiresPPT: requiresPPT && !isVideoPipelineRequest,
+      requiresSearch: requiresSearch && !isVideoPipelineRequest,
+      requiresVideoProbe,
+      requiresVideoDownload,
+      requiresTranscript,
+      ...(videoUrl ? { videoUrl } : {}),
       expectedArtifacts,
     };
+  }
+
+  private isLikelyVideoUrl(url: string): boolean {
+    const lower = url.toLowerCase();
+    return (
+      lower.includes('/video/') ||
+      lower.includes('youtube.com/watch') ||
+      lower.includes('youtu.be/') ||
+      lower.includes('vimeo.com/') ||
+      lower.includes('bilibili.com/video/')
+    );
   }
 
   /**
@@ -99,6 +142,33 @@ export class TaskManager {
    */
   private createExecutionPlan(goal: TaskGoal): ExecutionStep[] {
     const plan: ExecutionStep[] = [];
+
+    if (goal.requiresVideoProbe) {
+      plan.push({
+        id: generateId(),
+        type: 'video_probe',
+        description: 'Validate video URL and inspect available metadata/subtitle tracks',
+        status: 'pending',
+      });
+    }
+
+    if (goal.requiresVideoDownload) {
+      plan.push({
+        id: generateId(),
+        type: 'video_download',
+        description: 'Download the requested video',
+        status: 'pending',
+      });
+    }
+
+    if (goal.requiresTranscript) {
+      plan.push({
+        id: generateId(),
+        type: 'video_transcript',
+        description: 'Extract full transcript for the provided video',
+        status: 'pending',
+      });
+    }
 
     if (goal.requiresSearch) {
       plan.push({
@@ -205,6 +275,9 @@ export class TaskManager {
       paper_selection: [],
       summarization: [],
       ppt_generation: ['ppt_generator'],
+      video_probe: ['video_probe'],
+      video_download: ['video_download'],
+      video_transcript: ['video_transcript'],
       file_output: [],
     };
     return stepToolMap[stepType]?.includes(toolName) || false;
@@ -342,6 +415,12 @@ export class TaskManager {
     const allArtifactsGenerated = state.goal.expectedArtifacts.every((artifact) => {
       if (artifact === 'ppt') return pptGenerated;
       if (artifact === 'search_results') return state.searchResults.length > 0;
+      if (artifact === 'video_file') {
+        return history.some((call) => call.toolName === 'video_download' && call.success);
+      }
+      if (artifact === 'transcript') {
+        return history.some((call) => call.toolName === 'video_transcript' && call.success);
+      }
       return false;
     });
 
@@ -531,6 +610,19 @@ export class TaskManager {
     context += `- For "last 24 hours", "today", or "yesterday": include only sources whose published timestamp is explicitly within that UTC window\n`;
     context += `- When reporting release/publish time, prefer exact UTC timestamps. If unknown, state "publication time unknown" instead of guessing\n`;
     context += `- Do NOT explain internal tool limitations to the user\n`;
+    if (state.goal.requiresVideoProbe || state.goal.requiresVideoDownload || state.goal.requiresTranscript) {
+      context += `- The user requested video processing; prioritize video tools (video_probe, video_download, video_transcript) over unrelated tools.\n`;
+      context += `- For transcript requests, return transcript text and artifacts from video_transcript output.\n`;
+      context += `- Prefer includeTimestamps=true for better downstream evidence alignment.\n`;
+      const isVideoSummaryRequest = this.SUMMARY_INTENT_PATTERN.test(state.goal.description);
+      if (isVideoSummaryRequest) {
+        context += `- For summary questions, prefer transcript-grounded answers with relevant timeline evidence when available.\n`;
+        context += `- If transcript evidence is insufficient, communicate uncertainty explicitly rather than guessing.\n`;
+      }
+      if (state.goal.videoUrl) {
+        context += `- Target video URL: ${state.goal.videoUrl}\n`;
+      }
+    }
 
     return context;
   }

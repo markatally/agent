@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useChatStore } from '../../../stores/chatStore';
 import { ReasoningTrace } from '../ReasoningTrace';
@@ -178,7 +179,11 @@ describe('ReasoningTrace (Inspector)', () => {
 
     expect(screen.queryByText('Response Summary')).not.toBeInTheDocument();
     expect(screen.queryByText('Request Params')).not.toBeInTheDocument();
-    expect(screen.queryByText('Internal Reasoning')).not.toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Draft internal reasoning.')).not.toBeVisible();
+
+    await userEvent.click(screen.getByText('Thinking'));
+    expect(screen.getByText('Draft internal reasoning.')).toBeVisible();
 
     await userEvent.click(screen.getByRole('button', { name: /Debug/i }));
 
@@ -605,5 +610,209 @@ describe('ReasoningTrace (Inspector)', () => {
     const titles = screen.getAllByText(/Step \d+:/i).map((el) => el.textContent);
     expect(titles[0]).toContain('Step 1: Reasoning');
     expect(titles[1]).toContain('Step 2: Tool Step');
+  });
+
+  it('uses reasoning-step lifecycle as source-of-truth for tool step status', () => {
+    const sessionId = 'session-tool-status-source';
+    const now = Date.now();
+
+    useChatStore.setState({
+      messages: new Map([
+        [
+          sessionId,
+          [
+            {
+              id: 'assistant-tool-status',
+              sessionId,
+              role: 'assistant',
+              content: 'answer',
+              createdAt: new Date(now),
+            },
+          ],
+        ],
+      ]),
+      reasoningSteps: new Map([
+        [
+          sessionId,
+          [
+            {
+              stepId: 'tool-tc-1',
+              stepIndex: 1,
+              label: 'Searching',
+              status: 'completed',
+              startedAt: now - 1000,
+              completedAt: now - 500,
+              durationMs: 500,
+            },
+          ],
+        ],
+      ]),
+      toolCalls: new Map([
+        [
+          'tc-1',
+          {
+            sessionId,
+            toolCallId: 'tc-1',
+            toolName: 'web_search',
+            status: 'running',
+            params: { query: 'state machine status' },
+          },
+        ],
+      ]),
+    });
+
+    render(<ReasoningTrace sessionId={sessionId} />);
+    const toolStepButton = screen.getByRole('button', { name: /Step 1: Tool Step/i });
+    const durationColumn = toolStepButton.parentElement?.querySelector('.w-20') as HTMLElement | null;
+    expect(durationColumn?.querySelector('svg')).toBeNull();
+  });
+
+  it('ui e2e simulation keeps at most one running step through a full trace', () => {
+    const sessionId = 'session-ui-e2e-linear';
+    const traceId = 'trace-ui-linear';
+    const base = Date.now();
+    let ts = base;
+    const tick = () => {
+      ts += 100;
+      return ts;
+    };
+
+    useChatStore.setState({
+      messages: new Map([
+        [
+          sessionId,
+          [
+            {
+              id: 'assistant-ui-e2e',
+              sessionId,
+              role: 'assistant',
+              content: 'answer',
+              createdAt: new Date(base),
+            },
+          ],
+        ],
+      ]),
+      reasoningSteps: new Map(),
+      toolCalls: new Map(),
+      isStreaming: true,
+      streamingSessionId: sessionId,
+    });
+
+    render(<ReasoningTrace sessionId={sessionId} />);
+
+    const apply = (event: {
+      eventId: string;
+      stepId: string;
+      stepIndex: number;
+      eventSeq: number;
+      lifecycle: 'STARTED' | 'UPDATED' | 'FINISHED';
+      label: string;
+      finalStatus?: 'SUCCEEDED' | 'FAILED' | 'CANCELED';
+    }) =>
+      act(() => {
+        useChatStore.getState().applyReasoningEvent(sessionId, {
+          eventId: event.eventId,
+          traceId,
+          stepId: event.stepId,
+          stepIndex: event.stepIndex,
+          eventSeq: event.eventSeq,
+          lifecycle: event.lifecycle,
+          timestamp: tick(),
+          label: event.label,
+          finalStatus: event.finalStatus,
+        });
+      });
+
+    const assertSingleRunning = () => {
+      expect(document.querySelectorAll('.animate-spin').length).toBeLessThanOrEqual(1);
+    };
+
+    apply({
+      eventId: 'e1',
+      stepId: 's1',
+      stepIndex: 1,
+      eventSeq: 1,
+      lifecycle: 'STARTED',
+      label: 'Generating response',
+    });
+    assertSingleRunning();
+
+    apply({
+      eventId: 'e2',
+      stepId: 's2',
+      stepIndex: 2,
+      eventSeq: 1,
+      lifecycle: 'STARTED',
+      label: 'Reasoning',
+    });
+    assertSingleRunning();
+
+    apply({
+      eventId: 'e3',
+      stepId: 's1',
+      stepIndex: 1,
+      eventSeq: 2,
+      lifecycle: 'FINISHED',
+      label: 'Generating response',
+      finalStatus: 'SUCCEEDED',
+    });
+    assertSingleRunning();
+
+    // Simulate tool call row while reasoning step is active.
+    act(() => {
+      useChatStore.setState((state) => ({
+        toolCalls: new Map(state.toolCalls).set('tool-1', {
+          sessionId,
+          toolCallId: 'tool-1',
+          toolName: 'video_probe',
+          status: 'running',
+          params: { url: 'https://www.bilibili.com/video/BV1GqcWzuELB' },
+        } as any),
+      }));
+    });
+    assertSingleRunning();
+
+    apply({
+      eventId: 'e4',
+      stepId: 's2',
+      stepIndex: 2,
+      eventSeq: 2,
+      lifecycle: 'FINISHED',
+      label: 'Reasoning',
+      finalStatus: 'SUCCEEDED',
+    });
+    assertSingleRunning();
+
+    apply({
+      eventId: 'e5',
+      stepId: 'tool-tool-1',
+      stepIndex: 3,
+      eventSeq: 1,
+      lifecycle: 'STARTED',
+      label: 'Executing tool',
+    });
+    assertSingleRunning();
+
+    apply({
+      eventId: 'e6',
+      stepId: 'tool-tool-1',
+      stepIndex: 3,
+      eventSeq: 2,
+      lifecycle: 'FINISHED',
+      label: 'Executing tool',
+      finalStatus: 'SUCCEEDED',
+    });
+    assertSingleRunning();
+
+    act(() => {
+      useChatStore.getState().finalizeReasoningTrace(sessionId, tick());
+      useChatStore.setState({ isStreaming: false, streamingSessionId: null });
+    });
+    assertSingleRunning();
+
+    expect(screen.getByText('Step 1: Generate Answer')).toBeInTheDocument();
+    expect(screen.getByText('Step 2: Reasoning')).toBeInTheDocument();
+    expect(screen.getByText('Step 3: Tool Step')).toBeInTheDocument();
+    expect(document.querySelectorAll('.animate-spin').length).toBe(0);
   });
 });

@@ -184,6 +184,30 @@ describe('Chat Integration Tests', () => {
       // Cleanup
       await prisma.session.delete({ where: { id: inactiveSession.id } });
     });
+
+    it('should fail safely for video summary requests if no video tools are executed', async () => {
+      const res = await app.request(`/api/sessions/${testSession.id}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          content:
+            'please make a summary for this video: https://www.bilibili.com/video/BV1GqcWzuELB',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+      const bodyText = await res.text();
+      expect(bodyText).toContain(
+        'required video tools were not executed'
+      );
+      expect(bodyText).toContain('video_probe and video_transcript');
+      expect(bodyText).not.toContain('marginal propensity to consume');
+    });
   });
 
   describe('Skill Command Detection', () => {

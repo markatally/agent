@@ -64,6 +64,33 @@ mark-agent/
 └── docker/            # Docker files
 ```
 
+## Key Files
+
+Top code files and their core functions (~20% of code, ~80% of main behavior):
+
+| File | Core Function |
+|------|---------------|
+| `apps/api/src/routes/stream.ts` | Main agent SSE endpoint: LLM loop, tool execution, reasoning/thinking events, sandbox/browser events, PPT pipeline, session scoping |
+| `apps/api/src/services/tasks/task_manager.ts` | Task orchestration: goal inference from user message, execution plans, step limits, search/PPT flow control, reflection |
+| `apps/web/src/stores/chatStore.ts` | Central chat state: messages, tool calls, agent steps, reasoning traces, browser timeline, artifacts; session-scoped keys |
+| `apps/api/src/services/tools/registry.ts` | Tool registry: built-ins (file, bash, PPT, web search, video, browser) and MCP bridge registration |
+| `apps/api/src/services/llm.ts` | LLM client for OpenAI-compatible APIs: chat completions, streaming, tool-calling format |
+| `apps/web/src/hooks/useSSE.ts` | SSE connection hook: connects to stream, maps events into chatStore, idle timeout, session filtering |
+| `apps/web/src/hooks/useChat.ts` | Chat hydration: load/reconstruct messages, map agent steps from metadata, persistence |
+| `apps/web/src/lib/sse.ts` | SSE client: EventSource wrapper, reconnection, event parsing, close handling |
+| `apps/web/src/components/chat/ChatContainer.tsx` | Main chat UI: send messages, render timeline, wire SSE, layout/inspector coordination |
+| `apps/api/src/services/browser/manager.ts` | Browser sessions: Playwright Chromium per session, screencast, viewport, lifecycle |
+| `apps/api/src/services/mcp/bridge.ts` | MCP integration: bridge MCP tools to native Tool interface for registry |
+| `apps/api/src/services/sandbox/manager.ts` | Sandbox: Docker containers for bash/code execution, filesystem mounts, exec isolation |
+| `apps/api/src/routes/messages.ts` | Message CRUD: create messages, load history, session ownership checks |
+| `apps/api/src/services/skills/processor.ts` | Skill processor: slash-command parsing, parameter extraction, prompt formatting |
+| `packages/shared/src/index.ts` | Shared types: Message, ToolCall, ToolResult, Artifact, ExecutionPlan, TableIR |
+| `apps/api/src/index.ts` | API bootstrap: Hono app, CORS, auth/session/stream/file/skill routes |
+| `apps/web/src/components/inspector/InspectorPanel.tsx` | Inspector tabs: Computer, Tools, Sources, Reasoning |
+| `apps/web/src/components/inspector/ComputerPanel.tsx` | Computer mode: browser timeline, snapshots, scrubber; session-scoped rendering |
+| `apps/web/src/components/inspector/ReasoningTrace.tsx` | Reasoning trace UI: tool steps, thinking content, collapsed/expanded |
+| `apps/api/src/services/tools/video_transcript.ts` | Video transcript tool: Bilibili/YouTube transcript fetching |
+
 ## Available Scripts
 
 ```bash

@@ -278,6 +278,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
           associateToolCallsWithMessage(sessionId, event.data.assistantMessageId);
           associateAgentStepsWithMessage(sessionId, event.data.assistantMessageId);
         }
+        finalizeReasoningTrace(sessionId, typeof event.timestamp === 'number' ? event.timestamp : Date.now());
         stopStreaming();
         // Refetch messages to ensure we have the latest
         queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'messages'] });
@@ -286,6 +287,11 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
       case 'thinking.start':
         // Set thinking state to show indicator between tool execution steps
         setThinking(true);
+        break;
+
+      case 'thinking.complete':
+        // Explicitly clear thinking state when backend signals completion.
+        setThinking(false);
         break;
 
       case 'tool.start':
@@ -833,6 +839,15 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
           variant: 'destructive',
         });
         break;
+
+      case 'session.end':
+        finalizeReasoningTrace(
+          sessionId,
+          typeof event.timestamp === 'number' ? event.timestamp : Date.now()
+        );
+        stopStreaming();
+        queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'messages'] });
+        break;
     }
   };
 
@@ -941,7 +956,13 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
         handleSSEEvent(event as SSEEvent);
       }
 
-      // Note: message.complete handler already invalidates queries, no need to duplicate here
+      // Fallback cleanup: if stream ended without terminal event (e.g. message.complete/session.end),
+      // ensure UI does not remain stuck in streaming/thinking state.
+      const streamState = useChatStore.getState();
+      if (streamState.isStreaming && streamState.streamingSessionId === sessionId) {
+        stopStreaming();
+        queryClient.invalidateQueries({ queryKey: ['sessions', sessionId, 'messages'] });
+      }
     } catch (error: any) {
       if (error?.name === 'AbortError') {
         stopStreaming();

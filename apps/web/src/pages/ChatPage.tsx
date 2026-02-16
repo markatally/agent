@@ -121,11 +121,13 @@ export function ChatPage() {
                     Select a session from the sidebar or create a new one to get started.
                   </p>
                 </div>
-                <ChatInput
-                  onSend={handleStartChat}
-                  disabled={createSession.isPending}
-                  onOpenSkills={() => openSettings('skills')}
-                />
+                <div className="w-full max-w-[61.8%] min-w-[280px] mx-auto">
+                  <ChatInput
+                    onSend={handleStartChat}
+                    disabled={createSession.isPending}
+                    onOpenSkills={() => openSettings('skills')}
+                  />
+                </div>
               </div>
             </div>
           )}

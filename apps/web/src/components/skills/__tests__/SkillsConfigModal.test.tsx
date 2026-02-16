@@ -264,6 +264,36 @@ describe('SkillsConfigModal - Functionality', () => {
       expect(mockMutate).toHaveBeenCalled();
     });
   });
+
+  it('should use left navigation to switch between Skills and Layout panels', async () => {
+    (apiClient.externalSkills.list as any).mockResolvedValue({
+      skills: [
+        {
+          canonicalId: 'test-skill',
+          name: 'Test Skill',
+          description: 'A test skill',
+          category: 'test',
+          source: { repoUrl: '' },
+        },
+      ],
+    });
+
+    render(
+      <SkillsConfigModal open={true} onOpenChange={() => {}} />,
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search skills...')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /layout/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Control how wide the center chat content appears.')).toBeInTheDocument();
+      expect(screen.getByText('Narrow')).toBeInTheDocument();
+    });
+  });
 });
 
 describe('SkillsConfigModal - Scope and Filters', () => {

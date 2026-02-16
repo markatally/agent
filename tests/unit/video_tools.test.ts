@@ -339,6 +339,81 @@ describe('VideoTranscriptTool', () => {
     expect(extractSegmentCount(result.output)).toBe(2);
   });
 
+  it('captures preview snapshots for transcript-only analysis flows', async () => {
+    const progressMessages: string[] = [];
+    const tool = new VideoTranscriptTool(mockContext, {
+      execFileFn: async (command, args) => {
+        if (args.includes('--version')) {
+          return { stdout: '2026.01.01\n', stderr: '' };
+        }
+
+        if (command === 'ffprobe') {
+          return { stdout: '400\n', stderr: '' };
+        }
+
+        if (command === 'ffmpeg') {
+          const outputPath = args[args.length - 1];
+          await fs.writeFile(outputPath, Buffer.from(`frame-${outputPath}`));
+          return { stdout: '', stderr: '' };
+        }
+
+        const outputIndex = args.findIndex((value) => value === '--output');
+        const template = outputIndex >= 0 ? args[outputIndex + 1] : '';
+
+        if (args.includes('--write-subs')) {
+          const subtitlePath = template.replace('.%(ext)s', '.en.vtt');
+          await fs.mkdir(path.dirname(subtitlePath), { recursive: true });
+          await fs.writeFile(
+            subtitlePath,
+            [
+              'WEBVTT',
+              '',
+              '00:00:00.000 --> 00:00:02.000',
+              'Hello world',
+              '',
+              '00:00:02.000 --> 00:00:04.000',
+              'Snapshot path test',
+              '',
+            ].join('\n'),
+            'utf8'
+          );
+          return { stdout: '', stderr: '' };
+        }
+
+        if (args.includes('--format')) {
+          const snapshotVideoPath = template.replace('.%(ext)s', '.mp4');
+          await fs.mkdir(path.dirname(snapshotVideoPath), { recursive: true });
+          await fs.writeFile(snapshotVideoPath, 'fake snapshot video content');
+          return { stdout: `${snapshotVideoPath}\n`, stderr: '' };
+        }
+
+        return { stdout: '', stderr: '' };
+      },
+      persistFileRecord: async () => 'file-transcript-with-snapshots',
+    });
+
+    const result = await tool.execute(
+      {
+        url: 'https://example.com/video',
+        language: 'en',
+        includeTimestamps: true,
+        filename: 'transcript-snapshot-test',
+      },
+      (_current, _total, message) => {
+        if (message) progressMessages.push(message);
+      }
+    );
+
+    expect(result.success).toBe(true);
+    expect(Array.isArray(result.previewSnapshots)).toBe(true);
+    expect(result.previewSnapshots?.length).toBe(10);
+    expect(result.previewSnapshots?.every((item) => item.startsWith('data:image/jpeg;base64,'))).toBe(
+      true
+    );
+    expect(result.output).toContain('Snapshots: 10 frame');
+    expect(progressMessages.some((msg) => msg.startsWith('__video_snapshot__'))).toBe(true);
+  });
+
   it('returns install guidance when no yt-dlp runner is available', async () => {
     const tool = new VideoTranscriptTool(mockContext, {
       execFileFn: async () => {
@@ -429,6 +504,65 @@ describe('VideoTranscriptTool', () => {
     expect(result.artifacts?.length).toBe(1);
     expect(result.output).toContain('Whisper transcribed line one');
     expect(extractSegmentCount(result.output)).toBe(2);
+  });
+
+  it('scales whisper-related timeouts dynamically with long video durations', async () => {
+    let seenAudioTimeout = 0;
+    let seenWhisperTimeout = 0;
+    const tool = new VideoTranscriptTool(mockContext, {
+      execFileFn: async (command, args, options) => {
+        if (args.includes('--version')) {
+          return { stdout: '2026.01.01\n', stderr: '' };
+        }
+        if (args.includes('--write-subs')) {
+          // Force fallback to Whisper by not writing subtitle files.
+          const outputIndex = args.findIndex((v) => v === '--output');
+          const template = outputIndex >= 0 ? args[outputIndex + 1] : '';
+          await fs.mkdir(path.dirname(template), { recursive: true });
+          return { stdout: '', stderr: '' };
+        }
+        if (args.includes('--help') && (command === 'whisper' || args.includes('whisper'))) {
+          return { stdout: 'usage: whisper', stderr: '' };
+        }
+        if (args.includes('--extract-audio')) {
+          seenAudioTimeout = Number(options?.timeout || 0);
+          const outputIndex = args.findIndex((v) => v === '--output');
+          const audioPath = outputIndex >= 0 ? args[outputIndex + 1] : '';
+          await fs.mkdir(path.dirname(audioPath), { recursive: true });
+          await fs.writeFile(audioPath, 'fake wav data');
+          return { stdout: '', stderr: '' };
+        }
+        if (args.includes('--output_format')) {
+          seenWhisperTimeout = Number(options?.timeout || 0);
+          const audioArg = args.find((a) => a.endsWith('.wav'));
+          const dirIndex = args.findIndex((v) => v === '--output_dir');
+          const outputDir = dirIndex >= 0 ? args[dirIndex + 1] : '';
+          const stem = path.basename(audioArg || '', '.wav');
+          const srtPath = path.join(outputDir, `${stem}.srt`);
+          await fs.writeFile(
+            srtPath,
+            ['1', '00:00:00,000 --> 00:00:03,000', '长视频动态超时测试', ''].join('\n'),
+            'utf8'
+          );
+          return { stdout: '', stderr: '' };
+        }
+        return { stdout: '', stderr: '' };
+      },
+      persistFileRecord: async () => 'file-dynamic-timeout',
+    });
+
+    const result = await tool.execute({
+      url: 'https://example.com/very-long-video',
+      language: 'zh',
+      includeTimestamps: true,
+      filename: 'dynamic-timeout-test',
+      durationSeconds: 5400, // 90 minutes
+    });
+
+    expect(result.success).toBe(true);
+    expect(seenAudioTimeout).toBeGreaterThan(300000);
+    expect(seenWhisperTimeout).toBeGreaterThan(300000);
+    expect(seenWhisperTimeout).toBeGreaterThan(seenAudioTimeout);
   });
 
   it('returns WHISPER_NOT_FOUND error when whisper missing and no subtitles', async () => {
@@ -630,6 +764,55 @@ describe('VideoTranscriptTool', () => {
     expect(result.output).toContain('--- Transcript ---');
     expect(result.output).toContain('First line of dialogue');
     expect(result.output).toContain('Second line of dialogue');
+  });
+
+  it('does not truncate long transcript text in output', async () => {
+    const longSegments = Array.from({ length: 280 }, (_, i) => `Line ${i + 1}: 这是第${i + 1}段转录文本`).join('\n');
+    const toSrtTs = (totalSeconds: number) => {
+      const h = Math.floor(totalSeconds / 3600);
+      const m = Math.floor((totalSeconds % 3600) / 60);
+      const s = totalSeconds % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},000`;
+    };
+    const tool = new VideoTranscriptTool(mockContext, {
+      execFileFn: async (_command, args) => {
+        if (args.includes('--version')) {
+          return { stdout: '2026.01.01\n', stderr: '' };
+        }
+        const outputIndex = args.findIndex((v) => v === '--output');
+        const template = outputIndex >= 0 ? args[outputIndex + 1] : '';
+        const subtitlePath = template.replace('.%(ext)s', '.zh.srt');
+        await fs.mkdir(path.dirname(subtitlePath), { recursive: true });
+
+        // Build deterministic long SRT content.
+        const srtLines: string[] = [];
+        for (let i = 0; i < 280; i += 1) {
+          const startSec = i;
+          const endSec = i + 1;
+          srtLines.push(String(i + 1));
+          srtLines.push(`${toSrtTs(startSec)} --> ${toSrtTs(endSec)}`);
+          srtLines.push(`Line ${i + 1}: 这是第${i + 1}段转录文本`);
+          srtLines.push('');
+        }
+        await fs.writeFile(subtitlePath, srtLines.join('\n'), 'utf8');
+        return { stdout: '', stderr: '' };
+      },
+      persistFileRecord: async () => 'file-long-transcript',
+    });
+
+    const result = await tool.execute({
+      url: 'https://example.com/long-video',
+      language: 'zh',
+      includeTimestamps: true,
+      filename: 'long-transcript-output-test',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('--- Transcript ---');
+    expect(result.output).not.toContain('[truncated]');
+    expect(result.output).toContain('Line 1: 这是第1段转录文本');
+    expect(result.output).toContain('Line 280: 这是第280段转录文本');
+    expect(result.output).toContain(longSegments.split('\n')[120]);
   });
 
   it('deduplicates overlapping incremental subtitle cues from auto-generated tracks', async () => {

@@ -13,6 +13,7 @@ import {
   runWhisperCommand,
   type YtDlpRunner,
 } from './video_runtime';
+import { extractPreviewSnapshots } from './video_preview_snapshots';
 
 type ExecFileResult = { stdout: string; stderr: string };
 type ExecFileFn = (
@@ -38,6 +39,13 @@ interface TranscriptSegment {
 interface ParsedTimestampRange {
   start: number;
   end: number;
+}
+
+interface TranscriptTimeoutProfile {
+  subtitleFetchMs: number;
+  audioExtractMs: number;
+  whisperMs: number;
+  snapshotMs: number;
 }
 
 function isHttpUrl(value: string): boolean {
@@ -138,6 +146,21 @@ function parseTimestampToSeconds(value: string): number | null {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
+function formatTimestampForOutput(value: string): string {
+  const totalSeconds = parseTimestampToSeconds(value);
+  if (totalSeconds == null) return value;
+
+  const totalMilliseconds = Math.round(totalSeconds * 1000);
+  const hours = Math.floor(totalMilliseconds / 3_600_000);
+  const minutes = Math.floor((totalMilliseconds % 3_600_000) / 60_000);
+  const secondsWhole = Math.floor((totalMilliseconds % 60_000) / 1_000);
+  const milliseconds = totalMilliseconds % 1_000;
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(
+    secondsWhole
+  ).padStart(2, '0')}.${String(milliseconds).padStart(3, '0')}`;
+}
+
 function parseRange(segment: TranscriptSegment): ParsedTimestampRange | null {
   const start = parseTimestampToSeconds(segment.start);
   const end = parseTimestampToSeconds(segment.end);
@@ -232,7 +255,14 @@ function buildTranscriptText(
   includeTimestamps: boolean
 ): string {
   if (includeTimestamps) {
-    return segments.map((segment) => `[${segment.start} --> ${segment.end}] ${segment.text}`).join('\n');
+    return segments
+      .map(
+        (segment) =>
+          `[${formatTimestampForOutput(segment.start)} --> ${formatTimestampForOutput(
+            segment.end
+          )}] ${segment.text}`
+      )
+      .join('\n');
   }
   return segments.map((segment) => segment.text).join('\n');
 }
@@ -312,6 +342,12 @@ async function resolveSubtitlePath(
   return path.join(outputDir, ranked[0].filename);
 }
 
+function toFinitePositiveNumber(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
 export class VideoTranscriptTool implements Tool {
   name = 'video_transcript';
   description =
@@ -342,6 +378,11 @@ export class VideoTranscriptTool implements Tool {
         type: 'string' as const,
         description:
           'Optional browser profile for authenticated pages (e.g. chrome, edge, firefox).',
+      },
+      durationSeconds: {
+        type: 'number' as const,
+        description:
+          'Optional known video duration in seconds (for dynamic timeout tuning). If omitted, the tool will probe metadata.',
       },
     },
     required: ['url'],
@@ -415,6 +456,12 @@ export class VideoTranscriptTool implements Tool {
     const outputDir = path.join(process.cwd(), 'outputs', 'transcripts');
     await fs.mkdir(outputDir, { recursive: true });
 
+    const hintedDurationSeconds = toFinitePositiveNumber(params.durationSeconds);
+    const resolvedDurationSeconds =
+      hintedDurationSeconds ??
+      (await this.resolveVideoDurationSeconds(url, cookiesFromBrowser, ytDlpRunner));
+    const timeoutProfile = this.buildTimeoutProfile(resolvedDurationSeconds);
+
     const requestedName = String(params.filename || '').trim();
     const stem = sanitizeFilename(
       stripExtension(requestedName) || `transcript-${Date.now().toString(36)}`
@@ -433,18 +480,23 @@ export class VideoTranscriptTool implements Tool {
       stem,
       outputDir,
       ytDlpRunner,
+      commandTimeoutMs: timeoutProfile.subtitleFetchMs,
     });
 
     if (subtitleResult.subtitlePath) {
       // Subtitles found on first attempt
       return this.processSubtitleFile({
         subtitlePath: subtitleResult.subtitlePath,
+        url,
         language,
         includeTimestamps,
+        cookiesFromBrowser: effectiveCookies,
+        ytDlpRunner,
         stem,
         outputDir,
         startTime,
         onProgress,
+        snapshotTimeoutMs: timeoutProfile.snapshotMs,
       });
     }
 
@@ -465,17 +517,22 @@ export class VideoTranscriptTool implements Tool {
           stem,
           outputDir,
           ytDlpRunner,
+          commandTimeoutMs: timeoutProfile.subtitleFetchMs,
         });
 
         if (retryResult.subtitlePath) {
           return this.processSubtitleFile({
             subtitlePath: retryResult.subtitlePath,
+            url,
             language,
             includeTimestamps,
+            cookiesFromBrowser: browser,
+            ytDlpRunner,
             stem,
             outputDir,
             startTime,
             onProgress,
+            snapshotTimeoutMs: timeoutProfile.snapshotMs,
           });
         }
 
@@ -506,7 +563,65 @@ export class VideoTranscriptTool implements Tool {
       startTime,
       onProgress,
       ytDlpRunner,
+      audioExtractTimeoutMs: timeoutProfile.audioExtractMs,
+      whisperTimeoutMs: timeoutProfile.whisperMs,
+      snapshotTimeoutMs: timeoutProfile.snapshotMs,
     });
+  }
+
+  private async resolveVideoDurationSeconds(
+    url: string,
+    cookiesFromBrowser: string,
+    ytDlpRunner: YtDlpRunner
+  ): Promise<number | null> {
+    const args = ['--no-playlist', '--dump-single-json', '--no-warnings'];
+    if (cookiesFromBrowser) {
+      args.push('--cookies-from-browser', cookiesFromBrowser);
+    }
+    args.push(url);
+
+    try {
+      const { stdout } = await runYtDlpCommand(this.execFileFn, ytDlpRunner, args, {
+        timeout: Math.max(45000, Math.floor(this.timeout / 2)),
+        maxBuffer: 20 * 1024 * 1024,
+      });
+      const parsed = JSON.parse(stdout || '{}');
+      return toFinitePositiveNumber(parsed?.duration);
+    } catch {
+      return null;
+    }
+  }
+
+  private buildTimeoutProfile(durationSeconds: number | null): TranscriptTimeoutProfile {
+    const baseline = this.timeout;
+    if (!durationSeconds) {
+      return {
+        subtitleFetchMs: baseline,
+        audioExtractMs: baseline,
+        whisperMs: baseline,
+        snapshotMs: baseline,
+      };
+    }
+
+    // Dynamic scaling by media length (no fixed one-size limit).
+    const subtitleFetchMs = Math.max(
+      baseline,
+      Math.round((durationSeconds * 0.35 + 120) * 1000)
+    );
+    const audioExtractMs = Math.max(
+      baseline,
+      Math.round((durationSeconds * 1.25 + 180) * 1000)
+    );
+    const whisperMs = Math.max(
+      baseline,
+      Math.round((durationSeconds * 4.0 + 240) * 1000)
+    );
+    const snapshotMs = Math.max(
+      baseline,
+      Math.round((durationSeconds * 0.8 + 120) * 1000)
+    );
+
+    return { subtitleFetchMs, audioExtractMs, whisperMs, snapshotMs };
   }
 
   /**
@@ -521,8 +636,9 @@ export class VideoTranscriptTool implements Tool {
     stem: string;
     outputDir: string;
     ytDlpRunner: YtDlpRunner;
+    commandTimeoutMs: number;
   }): Promise<{ subtitlePath: string | null; authRequired: boolean; error?: string }> {
-    const { url, language, cookiesFromBrowser, stem, outputDir, ytDlpRunner } = opts;
+    const { url, language, cookiesFromBrowser, stem, outputDir, ytDlpRunner, commandTimeoutMs } = opts;
 
     const subtitleSelector = buildSubtitleLanguageSelector(language);
     const subtitleTemplate = path.join(outputDir, `${stem}.%(ext)s`);
@@ -548,7 +664,7 @@ export class VideoTranscriptTool implements Tool {
     let stderr = '';
     try {
       const result = await runYtDlpCommand(this.execFileFn, ytDlpRunner, subtitleArgs, {
-        timeout: this.timeout,
+        timeout: commandTimeoutMs,
         maxBuffer: 30 * 1024 * 1024,
       });
       stderr = result.stderr || '';
@@ -576,14 +692,30 @@ export class VideoTranscriptTool implements Tool {
    */
   private async processSubtitleFile(opts: {
     subtitlePath: string;
+    url: string;
     language: string;
     includeTimestamps: boolean;
+    cookiesFromBrowser: string;
+    ytDlpRunner: YtDlpRunner;
     stem: string;
     outputDir: string;
     startTime: number;
     onProgress?: ProgressCallback;
+    snapshotTimeoutMs: number;
   }): Promise<ToolResult> {
-    const { subtitlePath, language, includeTimestamps, stem, outputDir, startTime, onProgress } = opts;
+    const {
+      subtitlePath,
+      url,
+      language,
+      includeTimestamps,
+      cookiesFromBrowser,
+      ytDlpRunner,
+      stem,
+      outputDir,
+      startTime,
+      onProgress,
+      snapshotTimeoutMs,
+    } = opts;
 
     onProgress?.(55, 100, 'Parsing subtitle transcript...');
     const subtitleContent = await fs.readFile(subtitlePath, 'utf8');
@@ -601,12 +733,16 @@ export class VideoTranscriptTool implements Tool {
     return this.buildTranscriptResult({
       segments,
       source: path.basename(subtitlePath),
+      url,
       language,
       includeTimestamps,
+      cookiesFromBrowser,
+      ytDlpRunner,
       stem,
       outputDir,
       startTime,
       onProgress,
+      snapshotTimeoutMs,
     });
   }
 
@@ -632,14 +768,31 @@ export class VideoTranscriptTool implements Tool {
   private async buildTranscriptResult(opts: {
     segments: TranscriptSegment[];
     source: string;
+    url: string;
     language: string;
     includeTimestamps: boolean;
+    cookiesFromBrowser: string;
+    ytDlpRunner: YtDlpRunner;
     stem: string;
     outputDir: string;
     startTime: number;
     onProgress?: ProgressCallback;
+    snapshotTimeoutMs: number;
   }): Promise<ToolResult> {
-    const { segments, source, language, includeTimestamps, stem, outputDir, startTime, onProgress } = opts;
+    const {
+      segments,
+      source,
+      url,
+      language,
+      includeTimestamps,
+      cookiesFromBrowser,
+      ytDlpRunner,
+      stem,
+      outputDir,
+      startTime,
+      onProgress,
+      snapshotTimeoutMs,
+    } = opts;
 
     const transcriptText = buildTranscriptText(segments, includeTimestamps);
     const transcriptFilename = `${stem}.transcript.txt`;
@@ -667,13 +820,17 @@ export class VideoTranscriptTool implements Tool {
       }
     }
 
-    onProgress?.(100, 100, 'Transcript extraction complete');
+    const previewSnapshots = await this.capturePreviewSnapshots({
+      url,
+      cookiesFromBrowser,
+      ytDlpRunner,
+      stem,
+      outputDir,
+      onProgress,
+      snapshotTimeoutMs,
+    });
 
-    // Include truncated transcript text in output so it flows into conversation history
-    const MAX_OUTPUT_TEXT = 8 * 1024;
-    const truncatedText = transcriptText.length > MAX_OUTPUT_TEXT
-      ? transcriptText.slice(0, MAX_OUTPUT_TEXT) + '\n...[truncated]'
-      : transcriptText;
+    onProgress?.(100, 100, 'Transcript extraction complete');
 
     const summary = [
       'Transcript extraction completed.',
@@ -681,9 +838,16 @@ export class VideoTranscriptTool implements Tool {
       `Segments: ${segments.length}`,
       `Transcript file: ${transcriptFilename}`,
       `Path: ${relativeTranscriptPath}`,
+      ...(previewSnapshots.length > 0
+        ? [
+            `Snapshots: ${previewSnapshots.length} frame${
+              previewSnapshots.length === 1 ? '' : 's'
+            } sampled across video timeline`,
+          ]
+        : []),
       '',
       '--- Transcript ---',
-      truncatedText,
+      transcriptText,
     ].join('\n');
 
     return {
@@ -700,6 +864,7 @@ export class VideoTranscriptTool implements Tool {
           size: transcriptStats.size,
         },
       ],
+      previewSnapshots: previewSnapshots.length > 0 ? previewSnapshots : undefined,
     };
   }
 
@@ -737,8 +902,24 @@ export class VideoTranscriptTool implements Tool {
     startTime: number;
     onProgress?: ProgressCallback;
     ytDlpRunner: { command: string; baseArgs: string[]; label: string };
+    audioExtractTimeoutMs: number;
+    whisperTimeoutMs: number;
+    snapshotTimeoutMs: number;
   }): Promise<ToolResult> {
-    const { url, language, includeTimestamps, cookiesFromBrowser, stem, outputDir, startTime, onProgress, ytDlpRunner } = opts;
+    const {
+      url,
+      language,
+      includeTimestamps,
+      cookiesFromBrowser,
+      stem,
+      outputDir,
+      startTime,
+      onProgress,
+      ytDlpRunner,
+      audioExtractTimeoutMs,
+      whisperTimeoutMs,
+      snapshotTimeoutMs,
+    } = opts;
 
     // 1. Resolve whisper runner
     const whisperRunner = await resolveWhisperRunner(this.execFileFn);
@@ -769,7 +950,7 @@ export class VideoTranscriptTool implements Tool {
 
     try {
       await runYtDlpCommand(this.execFileFn, ytDlpRunner, audioArgs, {
-        timeout: this.timeout,
+        timeout: audioExtractTimeoutMs,
         maxBuffer: 30 * 1024 * 1024,
       });
     } catch (error: any) {
@@ -804,7 +985,7 @@ export class VideoTranscriptTool implements Tool {
 
     try {
       await runWhisperCommand(this.execFileFn, whisperRunner, whisperArgs, {
-        timeout: this.timeout,
+        timeout: whisperTimeoutMs,
         maxBuffer: 30 * 1024 * 1024,
       });
     } catch (error: any) {
@@ -852,12 +1033,91 @@ export class VideoTranscriptTool implements Tool {
     return this.buildTranscriptResult({
       segments,
       source: `whisper:${path.basename(srtPath)}`,
+      url,
       language,
       includeTimestamps,
+      cookiesFromBrowser,
+      ytDlpRunner,
       stem,
       outputDir,
       startTime,
       onProgress,
+      snapshotTimeoutMs,
     });
+  }
+
+  private async capturePreviewSnapshots(opts: {
+    url: string;
+    cookiesFromBrowser: string;
+    ytDlpRunner: YtDlpRunner;
+    stem: string;
+    outputDir: string;
+    onProgress?: ProgressCallback;
+    snapshotTimeoutMs: number;
+  }): Promise<string[]> {
+    const { url, cookiesFromBrowser, ytDlpRunner, stem, outputDir, onProgress, snapshotTimeoutMs } = opts;
+    const snapshotTemplate = path.join(outputDir, `${stem}.snapshots.%(ext)s`);
+    const snapshotArgs = [
+      '--no-playlist',
+      '--no-warnings',
+      '--format',
+      'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best',
+      '--output',
+      snapshotTemplate,
+      url,
+    ];
+    if (cookiesFromBrowser) {
+      snapshotArgs.splice(snapshotArgs.length - 1, 0, '--cookies-from-browser', cookiesFromBrowser);
+    }
+
+    try {
+      await runYtDlpCommand(this.execFileFn, ytDlpRunner, snapshotArgs, {
+        timeout: snapshotTimeoutMs,
+        maxBuffer: 30 * 1024 * 1024,
+      });
+    } catch {
+      return [];
+    }
+
+    const downloadedPath = await this.resolveSnapshotDownloadPath(outputDir, `${stem}.snapshots.`);
+    if (!downloadedPath) return [];
+
+    try {
+      return await extractPreviewSnapshots(
+        this.execFileFn,
+        downloadedPath,
+        outputDir,
+        url,
+        onProgress,
+        { base: 80, span: 15 }
+      );
+    } finally {
+      await fs.rm(downloadedPath, { force: true }).catch(() => {});
+    }
+  }
+
+  private async resolveSnapshotDownloadPath(
+    outputDir: string,
+    prefix: string
+  ): Promise<string | null> {
+    try {
+      const entries = await fs.readdir(outputDir);
+      const candidates = entries.filter((name) => name.startsWith(prefix));
+      if (candidates.length === 0) return null;
+
+      let newestPath: string | null = null;
+      let newestTime = -1;
+      for (const name of candidates) {
+        const fullPath = path.join(outputDir, name);
+        const stats = await fs.stat(fullPath);
+        if (stats.mtimeMs > newestTime) {
+          newestTime = stats.mtimeMs;
+          newestPath = fullPath;
+        }
+      }
+      return newestPath;
+    } catch {
+      return null;
+    }
   }
 }

@@ -5,6 +5,8 @@
   - `ANALYZE > PLAN > BUILD/FIX > TEST`
 - Do not skip phases.
 - "TEST" must include at least targeted automated tests relevant to the touched behavior; run broader tests when risk is medium/high.
+- Run end-to-end (E2E) tests when changes affect cross-service flows, streaming/tool orchestration, or critical user-visible journeys.
+  - If full E2E cannot be run in the current environment, explicitly document why and run the closest integration coverage available.
 
 ## Historical Fixes And Root Causes (Do Not Regress)
 

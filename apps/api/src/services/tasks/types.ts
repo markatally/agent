@@ -11,7 +11,15 @@ export type TaskPhase = 'planning' | 'executing' | 'reflecting' | 'completed' | 
 /**
  * Step type in execution plan
  */
-export type StepType = 'web_search' | 'paper_selection' | 'summarization' | 'ppt_generation' | 'file_output';
+export type StepType =
+  | 'web_search'
+  | 'paper_selection'
+  | 'summarization'
+  | 'ppt_generation'
+  | 'video_probe'
+  | 'video_download'
+  | 'video_transcript'
+  | 'file_output';
 
 /**
  * PPT pipeline steps for Manus-style timeline
@@ -65,6 +73,10 @@ export interface TaskGoal {
   description: string;
   requiresPPT: boolean;
   requiresSearch: boolean;
+  requiresVideoProbe: boolean;
+  requiresVideoDownload: boolean;
+  requiresTranscript: boolean;
+  videoUrl?: string;
   expectedArtifacts: string[];
 }
 

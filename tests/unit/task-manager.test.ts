@@ -59,6 +59,75 @@ describe('Task Manager', () => {
       const hasPptStep = state.plan.some(step => step.type === 'ppt_generation');
       expect(hasPptStep).toBe(true);
     });
+
+    it('should infer video download + transcript goal from video URL prompt', () => {
+      const state = taskManager.initializeTask(
+        'sess1',
+        'user1',
+        'please download this video and provide full transcripts for me: https://www.bilibili.com/video/BV1GqcWzuELB'
+      );
+
+      expect(state.goal.requiresVideoProbe).toBe(true);
+      expect(state.goal.requiresVideoDownload).toBe(true);
+      expect(state.goal.requiresTranscript).toBe(true);
+      expect(state.goal.requiresSearch).toBe(false);
+      expect(state.goal.requiresPPT).toBe(false);
+      expect(state.goal.videoUrl).toBe('https://www.bilibili.com/video/BV1GqcWzuELB');
+    });
+
+    it('should create video-first execution plan for transcript/download requests', () => {
+      const state = taskManager.initializeTask(
+        'sess1',
+        'user1',
+        'download and transcript this video: https://www.bilibili.com/video/BV1GqcWzuELB'
+      );
+
+      expect(state.plan.some((step) => step.type === 'video_probe')).toBe(true);
+      expect(state.plan.some((step) => step.type === 'video_download')).toBe(true);
+      expect(state.plan.some((step) => step.type === 'video_transcript')).toBe(true);
+      expect(state.plan.some((step) => step.type === 'web_search')).toBe(false);
+    });
+
+    it('should infer transcript goal for video summary requests', () => {
+      const state = taskManager.initializeTask(
+        'sess1',
+        'user1',
+        'please make a summary for this video: https://www.bilibili.com/video/BV1GqcWzuELB'
+      );
+
+      expect(state.goal.requiresVideoProbe).toBe(true);
+      expect(state.goal.requiresTranscript).toBe(true);
+      expect(state.goal.requiresVideoDownload).toBe(false);
+      expect(state.goal.requiresSearch).toBe(false);
+      expect(state.goal.videoUrl).toBe('https://www.bilibili.com/video/BV1GqcWzuELB');
+    });
+
+    it('should create transcript-first plan for video summary requests', () => {
+      const state = taskManager.initializeTask(
+        'sess1',
+        'user1',
+        'summarize this video: https://www.bilibili.com/video/BV1GqcWzuELB'
+      );
+
+      expect(state.plan.some((step) => step.type === 'video_probe')).toBe(true);
+      expect(state.plan.some((step) => step.type === 'video_transcript')).toBe(true);
+      expect(state.plan.some((step) => step.type === 'web_search')).toBe(false);
+    });
+
+    it('should infer transcript goal for Chinese video summary requests', () => {
+      const state = taskManager.initializeTask(
+        'sess1',
+        'user1',
+        '请分析总结这个视频： https://www.bilibili.com/video/BV1HPFCzzE3y'
+      );
+
+      expect(state.goal.requiresVideoProbe).toBe(true);
+      expect(state.goal.requiresTranscript).toBe(true);
+      expect(state.goal.requiresVideoDownload).toBe(false);
+      expect(state.goal.requiresSearch).toBe(false);
+      expect(state.goal.videoUrl).toBe('https://www.bilibili.com/video/BV1HPFCzzE3y');
+      expect(state.plan.some((step) => step.type === 'video_transcript')).toBe(true);
+    });
   });
   
   describe('getTaskState', () => {
@@ -157,6 +226,20 @@ describe('Task Manager', () => {
       
       const allowed = taskManager.shouldAllowToolCall('sess1', 'ppt_generator', { topic: 'AI' });
       expect(allowed).toBe(true);
+    });
+
+    it('should allow video_transcript without timestamps and leave preference to downstream retrieval', () => {
+      taskManager.initializeTask(
+        'sess1',
+        'user1',
+        'please summarize this video: https://www.bilibili.com/video/BV1GqcWzuELB'
+      );
+
+      const decision = taskManager.getToolCallDecision('sess1', 'video_transcript', {
+        url: 'https://www.bilibili.com/video/BV1GqcWzuELB',
+        includeTimestamps: false,
+      });
+      expect(decision.allowed).toBe(true);
     });
   });
 
@@ -266,6 +349,33 @@ describe('Task Manager', () => {
     it('should return empty for non-existent task', () => {
       const context = taskManager.getSystemPromptContext('non-existent');
       expect(context).toBe('');
+    });
+
+    it('should include video routing guidance for video transcript tasks', () => {
+      taskManager.initializeTask(
+        'sess1',
+        'user1',
+        'please download this video and provide transcript: https://www.bilibili.com/video/BV1GqcWzuELB'
+      );
+
+      const context = taskManager.getSystemPromptContext('sess1');
+      expect(context).toContain('The user requested video processing');
+      expect(context).toContain('video_probe, video_download, video_transcript');
+      expect(context).toContain('Target video URL: https://www.bilibili.com/video/BV1GqcWzuELB');
+      expect(context).toContain('Prefer includeTimestamps=true');
+    });
+
+    it('should include transcript-grounded summary instructions for video summary requests', () => {
+      taskManager.initializeTask(
+        'sess1',
+        'user1',
+        'please make a summary for this video: https://www.bilibili.com/video/BV1GqcWzuELB'
+      );
+
+      const context = taskManager.getSystemPromptContext('sess1');
+      expect(context).toContain('summary questions');
+      expect(context).toContain('transcript-grounded answers');
+      expect(context).toContain('timeline evidence');
     });
   });
   

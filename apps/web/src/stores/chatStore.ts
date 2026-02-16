@@ -388,6 +388,7 @@ interface ChatState {
   updateReasoningStep: (sessionId: string, stepId: string, updates: Partial<ReasoningStep>) => void;
   completeReasoningStep: (sessionId: string, stepId: string, completedAt: number) => void;
   applyReasoningEvent: (sessionId: string, event: ReasoningTraceEvent) => void;
+  finalizeReasoningTrace: (sessionId: string, completedAt?: number) => void;
   clearReasoningSteps: (sessionId?: string) => void;
 
   // Actions - Files
@@ -975,6 +976,82 @@ export const useChatStore = create<ChatState>((set, get) => ({
         reasoningPendingEvents: newPendingEvents,
         reasoningLateEventLog: newLateEventLog,
         reasoningLastTimestamp: newLastTimestamp,
+      };
+    });
+  },
+
+  finalizeReasoningTrace: (sessionId: string, completedAt?: number) => {
+    set((state) => {
+      const newReasoningSteps = new Map(state.reasoningSteps);
+      const newActiveStepId = new Map(state.reasoningActiveStepId);
+      const newPendingEvents = new Map(state.reasoningPendingEvents);
+      const newLateEventLog = new Map(state.reasoningLateEventLog);
+      const newLastTimestamp = new Map(state.reasoningLastTimestamp);
+      const newLastStepIndex = new Map(state.reasoningLastStepIndex);
+
+      const stepsForSession = [...(newReasoningSteps.get(sessionId) || [])];
+      if (stepsForSession.length === 0 && !(newPendingEvents.get(sessionId)?.length)) {
+        newActiveStepId.set(sessionId, null);
+        return {
+          reasoningActiveStepId: newActiveStepId,
+        };
+      }
+
+      let lastTimestamp = newLastTimestamp.get(sessionId) || 0;
+      const terminalAtBase = Math.max(completedAt ?? Date.now(), lastTimestamp + 1);
+      let terminalAtCursor = terminalAtBase;
+
+      for (const step of stepsForSession) {
+        if (step.status !== 'running') continue;
+        const doneAt = Math.max(step.startedAt, terminalAtCursor);
+        step.status = 'completed';
+        step.completedAt = doneAt;
+        step.durationMs = doneAt - step.startedAt;
+        terminalAtCursor += 1;
+      }
+
+      const pending = newPendingEvents.get(sessionId) || [];
+      if (pending.length > 0) {
+        const lateEvents = [...(newLateEventLog.get(sessionId) || [])];
+        for (const pendingEvent of pending) {
+          lateEvents.push({
+            eventId: pendingEvent.eventId,
+            traceId: pendingEvent.traceId,
+            stepId: pendingEvent.stepId,
+            stepIndex: pendingEvent.stepIndex,
+            eventSeq: pendingEvent.eventSeq,
+            lifecycle: pendingEvent.lifecycle,
+            reason: 'invalid_transition',
+            timestamp: pendingEvent.timestamp,
+          });
+        }
+        newLateEventLog.set(sessionId, lateEvents);
+      }
+
+      stepsForSession.sort((a, b) => {
+        const aIndex = a.stepIndex ?? Number.MAX_SAFE_INTEGER;
+        const bIndex = b.stepIndex ?? Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        return a.startedAt - b.startedAt;
+      });
+
+      const lastTerminal = stepsForSession
+        .filter((step) => isReasoningStepTerminal(step.status))
+        .reduce((max, step) => Math.max(max, step.stepIndex ?? 0), 0);
+
+      newReasoningSteps.set(sessionId, stepsForSession);
+      newActiveStepId.set(sessionId, null);
+      newPendingEvents.set(sessionId, []);
+      newLastTimestamp.set(sessionId, Math.max(lastTimestamp, terminalAtCursor - 1));
+      newLastStepIndex.set(sessionId, lastTerminal);
+
+      return {
+        reasoningSteps: newReasoningSteps,
+        reasoningActiveStepId: newActiveStepId,
+        reasoningPendingEvents: newPendingEvents,
+        reasoningLateEventLog: newLateEventLog,
+        reasoningLastTimestamp: newLastTimestamp,
+        reasoningLastStepIndex: newLastStepIndex,
       };
     });
   },

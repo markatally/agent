@@ -14,6 +14,7 @@ import path from 'path';
 import { getExternalSkillLoader } from '../services/external-skills/loader';
 import { getSandboxManager, SandboxOrchestrator } from '../services/sandbox';
 import { getBrowserManager, wrapExecutorWithBrowserEvents } from '../services/browser';
+import { answerVideoQueryFromTranscript } from '../services/transcript-qa';
 import type { ExecutionMode, InspectorTab } from '@mark/shared';
 import { decodeVideoSnapshotProgress } from '../services/tools/video_snapshot_progress';
 
@@ -42,6 +43,7 @@ stream.use('*', requireAuth);
 const AGENT_CONFIG = {
   maxToolSteps: 10,      // Maximum tool execution steps per turn
   maxExecutionTime: 5 * 60 * 1000, // 5 minutes max execution time
+  maxVideoExecutionTime: 12 * 60 * 1000, // 12 minutes for video/transcript-heavy turns
   idleTimeout: 30 * 1000, // 30 seconds idle timeout (frontend)
 } as const;
 
@@ -341,6 +343,244 @@ const inferFocusTab = (
   return { tab: 'reasoning', reason: 'Default reasoning trace' };
 };
 
+function sanitizeModelFacingContent(content: string): string {
+  if (!content) return '';
+
+  let sanitized = content;
+
+  // Remove explicit chain-of-thought tags if model emits them.
+  sanitized = sanitized.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '');
+  sanitized = sanitized.replace(/^[\s\S]*?<\/think>/i, '');
+  sanitized = sanitized.replace(/<\/?think\b[^>]*>/gi, '');
+
+  return sanitized.trim();
+}
+
+function looksLikeOffTopicCodeReplyForVideoTask(content: string): boolean {
+  const text = content.toLowerCase();
+  const codeSignals = [
+    'python',
+    'input.txt',
+    'with open(',
+    'print(line',
+    'file not found',
+    'def ',
+    '```python',
+  ];
+  const videoSignals = [
+    'video',
+    'transcript',
+    'subtitle',
+    'summary',
+    'summarize',
+    'bilibili',
+    'timestamp',
+  ];
+
+  const codeSignalCount = codeSignals.reduce(
+    (count, signal) => (text.includes(signal) ? count + 1 : count),
+    0
+  );
+  const hasVideoSignal = videoSignals.some((signal) => text.includes(signal));
+
+  return codeSignalCount >= 2 && !hasVideoSignal;
+}
+
+function isVideoSummaryIntentText(text: string): boolean {
+  return /\b(?:summar(?:y|ize|ise|ized|ised|ization|isation)|recap|overview)\b|总结|分析|概述|复盘|解读|梳理/i.test(
+    text
+  );
+}
+
+function isVideoContentIntentText(text: string): boolean {
+  return (
+    isVideoSummaryIntentText(text) ||
+    /视频|video|transcript|字幕|内容|讲了什么|有没有提到|细节|详细|展开|上面总结|more detailed|in detail|elaborate/i.test(
+      text
+    )
+  );
+}
+
+function isTranscriptSegmentFollowupText(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  const hasSegmentCue =
+    /(前面|后面|前半|后半|上半|下半|前\d+\s*\/\s*\d+|后\d+\s*\/\s*\d+|前[一二两三四五六七八九十\d]+分之[一二两三四五六七八九十\d]+|后[一二两三四五六七八九十\d]+分之[一二两三四五六七八九十\d]+)/i.test(
+      text
+    ) ||
+    /\b(first|last)\s+(half|third|quarter|\d+\s*\/\s*\d+)\b/.test(normalized);
+  if (!hasSegmentCue) return false;
+  return /讲了啥|讲了什么|说了什么|内容|重点|总结|概述|提到|what.*(cover|talk|say)|covered|talks about/i.test(
+    normalized
+  );
+}
+
+function extractFirstJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '{') depth += 1;
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+async function inferTranscriptFollowupIntentWithLlm(params: {
+  llm: any;
+  query: string;
+  sessionHasTranscriptContext: boolean;
+}): Promise<boolean> {
+  const { llm, query, sessionHasTranscriptContext } = params;
+  if (!llm?.streamChat) return false;
+  const trimmed = String(query || '').trim();
+  if (!trimmed) return false;
+
+  const system = [
+    'You classify whether a user follow-up should be answered from existing video transcript context.',
+    'Return JSON only: {"useTranscriptContext": true|false}.',
+    'Be language-agnostic. Consider all languages.',
+    'If the user asks what a video/section/part/half/timestamp says, return true.',
+    'If unrelated to transcript content, return false.',
+  ].join('\n');
+
+  const user = [
+    `User query: ${trimmed}`,
+    `Session has prior transcript context: ${sessionHasTranscriptContext ? 'yes' : 'no'}`,
+    'Output JSON now.',
+  ].join('\n');
+
+  let raw = '';
+  try {
+    for await (const chunk of llm.streamChat([
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ])) {
+      if (chunk.type === 'content' && chunk.content) raw += chunk.content;
+    }
+    const json = extractFirstJsonObject(raw);
+    if (!json) return false;
+    const parsed = JSON.parse(json) as { useTranscriptContext?: unknown };
+    return Boolean(parsed?.useTranscriptContext === true);
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyVideoUrl(url: string): boolean {
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('/video/') ||
+    lower.includes('youtube.com/watch') ||
+    lower.includes('youtu.be/') ||
+    lower.includes('vimeo.com/') ||
+    lower.includes('bilibili.com/video/')
+  );
+}
+
+function extractFirstVideoUrlFromText(text: string): string | null {
+  const urls = text.match(/https?:\/\/[^\s)]+/gi) || [];
+  const candidate = urls.find((url) => isLikelyVideoUrl(url));
+  return candidate || null;
+}
+
+async function loadLatestTranscriptToolMessageForSession(
+  sessionId: string,
+  requestedVideoUrl?: string
+): Promise<{ toolMessage: ExtendedLLMMessage } | null> {
+  const calls = await prisma.toolCall.findMany({
+    where: {
+      sessionId,
+      toolName: 'video_transcript',
+      status: 'completed',
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 8,
+    select: {
+      id: true,
+      parameters: true,
+      result: true,
+    },
+  });
+
+  for (const call of calls) {
+    const params = (call.parameters || {}) as Record<string, unknown>;
+    const paramUrl = typeof params?.url === 'string' ? params.url : '';
+    if (requestedVideoUrl && paramUrl && paramUrl !== requestedVideoUrl) {
+      continue;
+    }
+
+    let resultObj: Record<string, unknown> | null = null;
+    if (call.result && typeof call.result === 'object') {
+      resultObj = call.result as Record<string, unknown>;
+    } else if (typeof call.result === 'string') {
+      try {
+        resultObj = JSON.parse(call.result) as Record<string, unknown>;
+      } catch {
+        resultObj = null;
+      }
+    }
+    if (!resultObj) continue;
+
+    const output = typeof resultObj.output === 'string' ? resultObj.output : '';
+    if (!output.includes('--- Transcript ---')) continue;
+
+    const payload = JSON.stringify({
+      success: true,
+      output,
+      error: null,
+      artifacts: Array.isArray(resultObj.artifacts) ? resultObj.artifacts : [],
+      previewSnapshots: undefined,
+    });
+
+    return {
+      toolMessage: {
+        role: 'tool',
+        content: payload,
+        tool_call_id: `historical-video-transcript-${call.id}`,
+      },
+    };
+  }
+
+  return null;
+}
+
+function findLastVideoDurationSeconds(messages: ExtendedLLMMessage[]): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== 'tool' || !msg.content) continue;
+    try {
+      const parsed = JSON.parse(String(msg.content));
+      const artifacts = Array.isArray(parsed?.artifacts) ? parsed.artifacts : [];
+      for (const artifact of artifacts) {
+        if (artifact?.name !== 'video-probe.json' || typeof artifact?.content !== 'string') continue;
+        const probe = JSON.parse(artifact.content);
+        const duration = Number(probe?.duration);
+        if (Number.isFinite(duration) && duration > 0) return duration;
+      }
+    } catch {
+      // ignore malformed tool messages
+    }
+  }
+  return null;
+}
+
+function computeDynamicTurnTimeoutMs(
+  isVideoHeavyTurn: boolean,
+  durationSeconds: number | null
+): number {
+  if (!isVideoHeavyTurn) return AGENT_CONFIG.maxExecutionTime;
+  if (!durationSeconds) return AGENT_CONFIG.maxVideoExecutionTime;
+  // Dynamic scaling with media length.
+  return Math.max(
+    AGENT_CONFIG.maxVideoExecutionTime,
+    Math.round((durationSeconds * 2 + 8 * 60) * 1000)
+  );
+}
+
 /**
  * Process a single agent turn with continuation loop support
  *
@@ -352,7 +592,27 @@ const inferFocusTab = (
  * When PPT pipeline is enabled, callers pass activeStream (PptPipelineController.wrapStream(sseStream))
  * so that tool.complete and other events are seen by the pipeline and can trigger navigateToResults.
  */
-async function processAgentTurn(
+
+/**
+ * Extract the transcript text from the most recent video_transcript tool result in message history.
+ */
+function findLastTranscriptToolResult(messages: ExtendedLLMMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== 'tool' || !msg.content) continue;
+    try {
+      const parsed = JSON.parse(String(msg.content));
+      if (parsed.success && typeof parsed.output === 'string' && parsed.output.includes('--- Transcript ---')) {
+        const marker = '--- Transcript ---';
+        const idx = parsed.output.indexOf(marker);
+        return idx >= 0 ? parsed.output.slice(idx + marker.length).trim() : null;
+      }
+    } catch { /* skip non-JSON tool results */ }
+  }
+  return null;
+}
+
+export async function processAgentTurn(
   sessionId: string,
   messages: ExtendedLLMMessage[],
   tools: any,
@@ -373,6 +633,8 @@ async function processAgentTurn(
   let currentMessages = [...messages];
   let steps = 0;
   let finalContent = '';
+  let toolResultsThisTurn = 0;
+  let videoTranscriptSucceeded = findLastTranscriptToolResult(currentMessages) != null;
 
   const reasoningTimers = new Map<string, number>();
   const reasoningEventSeq = new Map<string, number>();
@@ -401,6 +663,7 @@ async function processAgentTurn(
   let pendingThinkingStepId: string | null = null;
   let generatingStepId: string | null = null;
   let planningStepId: string | null = null;
+  let videoToolReminderAttempts = 0;
 
   // Collector array for completed reasoning steps to persist in message metadata
   const completedReasoningSteps: Array<{
@@ -534,12 +797,52 @@ async function processAgentTurn(
     message: 'Processing query...',
   });
 
+  const initialGoal = taskManager.getTaskState?.(sessionId)?.goal;
+  const isVideoHeavyTurn = Boolean(
+    initialGoal &&
+      (initialGoal.requiresTranscript || initialGoal.requiresVideoDownload || initialGoal.requiresVideoProbe)
+  );
   // === CONTINUATION LOOP ===
   while (steps < maxSteps) {
+    const observedVideoDurationSeconds = findLastVideoDurationSeconds(currentMessages);
+    const turnTimeoutMs = computeDynamicTurnTimeoutMs(isVideoHeavyTurn, observedVideoDurationSeconds);
     // Check execution timeout
     const elapsed = Date.now() - startTime;
-    if (elapsed > AGENT_CONFIG.maxExecutionTime) {
-      throw new Error('Agent execution timeout exceeded');
+    if (elapsed > turnTimeoutMs) {
+      const timeoutMessage = isVideoHeavyTurn
+        ? 'The video analysis took too long and timed out before completion. Please retry; I will prioritize transcript extraction and summary generation first.'
+        : 'The request took too long and timed out before completion. Please retry.';
+
+      if (generatingStepId) {
+        await emitReasoningStep({
+          stepId: generatingStepId,
+          label: 'Generating response',
+          status: 'completed',
+          message: 'Execution timed out.',
+          finalStatus: 'FAILED',
+        });
+        generatingStepId = null;
+      }
+
+      await sseStream.writeSSE({
+        data: JSON.stringify({
+          type: 'message.complete',
+          sessionId,
+          timestamp: Date.now(),
+          data: {
+            content: timeoutMessage,
+            finishReason: 'timeout',
+            stepsTaken: steps,
+          },
+        }),
+      });
+
+      return {
+        content: timeoutMessage,
+        finishReason: 'timeout',
+        stepsTaken: steps,
+        reasoningSteps: completedReasoningSteps,
+      };
     }
 
     let hasToolCalls = false;
@@ -584,14 +887,9 @@ async function processAgentTurn(
           }
         }
 
-        await sseStream.writeSSE({
-          data: JSON.stringify({
-            type: 'message.delta',
-            sessionId,
-            timestamp: Date.now(),
-            data: { content: chunk.content, step: steps + 1 },
-          }),
-        });
+        // Intentionally do not stream draft content immediately.
+        // If this pass later switches to tool calls, draft text can be unrelated/noisy.
+        // We only emit user-facing content once we know this pass is a final answer.
       }
       else if (chunk.type === 'tool_call' && chunk.toolCall) {
         hasToolCalls = true;
@@ -604,7 +902,7 @@ async function processAgentTurn(
             label: 'Reasoning',
             status: 'completed',
             message: 'Drafted approach before tools.',
-            thinkingContent: stepContent.trim(),
+            thinkingContent: sanitizeModelFacingContent(stepContent.trim()),
           });
         }
 
@@ -636,63 +934,6 @@ async function processAgentTurn(
           });
           generatingStepId = null;
         }
-
-        // Parse params for the tool.start event so frontend can display them
-        let params = {};
-        try {
-          params = JSON.parse(chunk.toolCall.arguments || '{}');
-        } catch {
-          // Keep empty params if JSON parsing fails
-        }
-
-        const toolReasoningStepId = `tool-${chunk.toolCall.id}`;
-        const isSearch = searchToolNames.has(chunk.toolCall.name);
-        const queries = Array.isArray((params as any).queries)
-          ? (params as any).queries
-          : (params as any).query
-          ? [(params as any).query]
-          : undefined;
-
-        await emitReasoningStep({
-          stepId: toolReasoningStepId,
-          label: isSearch ? 'Searching' : videoToolLabels[chunk.toolCall.name] || 'Executing tool',
-          status: 'running',
-          message: isSearch
-            ? `Executing ${queries?.length || 1} search quer${queries?.length === 1 ? 'y' : 'ies'}...`
-            : `Running ${chunk.toolCall.name}...`,
-          details: {
-            queries,
-            toolName: chunk.toolCall.name,
-          },
-        });
-
-        await sseStream.writeSSE({
-          data: JSON.stringify({
-            type: 'tool.start',
-            sessionId,
-            timestamp: Date.now(),
-            data: {
-              toolCallId: chunk.toolCall.id,
-              toolName: chunk.toolCall.name,
-              params,
-              step: steps + 1,
-            },
-          }),
-        });
-
-        if (chunk.toolCall.name === 'web_search') {
-          await sseStream.writeSSE({
-            data: JSON.stringify({
-              type: 'inspector.focus',
-              sessionId,
-              timestamp: Date.now(),
-              data: {
-                tab: 'computer',
-                reason: 'Web search is tracked in Computer view',
-              },
-            }),
-          });
-        }
       }
       else if (chunk.type === 'done') {
         // No more chunks
@@ -701,9 +942,152 @@ async function processAgentTurn(
 
     // === Step 2: Process based on what LLM returned ===
     if (!hasToolCalls) {
+      const taskState = taskManager.getTaskState?.(sessionId);
+      const taskGoal = taskState?.goal;
+      const requiresVideoProcessing = Boolean(
+        taskGoal?.videoUrl &&
+          (taskGoal.requiresVideoProbe || taskGoal.requiresVideoDownload || taskGoal.requiresTranscript)
+      );
+      const requiresTranscriptForTask = Boolean(taskGoal?.requiresTranscript);
+
+      if (
+        requiresVideoProcessing &&
+        requiresTranscriptForTask &&
+        !videoTranscriptSucceeded &&
+        videoToolReminderAttempts < 2
+      ) {
+        videoToolReminderAttempts += 1;
+
+        currentMessages.push({
+          role: 'assistant',
+          content: stepContent || null,
+        });
+        currentMessages.push({
+          role: 'system',
+          content: [
+            `This request is a video-processing task for URL: ${taskGoal?.videoUrl || '(unknown)'}.`,
+            'Run the relevant video tools first (video_probe and video_transcript; use video_download only when needed).',
+            'Then answer using the extracted transcript/tool evidence.',
+          ].join(' '),
+        });
+
+        await emitReasoningStep({
+          stepId: `video-routing-${steps + 1}-${reasoningStepCounter++}`,
+          label: 'Analyzing',
+          status: 'running',
+          message: 'Retrying with required video tools before final response.',
+        });
+
+        steps += 1;
+        continue;
+      }
+
+      if (
+        requiresVideoProcessing &&
+        requiresTranscriptForTask &&
+        !videoTranscriptSucceeded
+      ) {
+        finalContent =
+          'I could not complete the video summary because required video tools were not executed. ' +
+          'Please retry; I will run video_probe and video_transcript for the provided video URL before summarizing.';
+
+        if (generatingStepId) {
+          await emitReasoningStep({
+            stepId: generatingStepId,
+            label: 'Generating response',
+            status: 'completed',
+            message: 'Video tool routing failed.',
+            finalStatus: 'FAILED',
+          });
+          generatingStepId = null;
+        }
+
+        await sseStream.writeSSE({
+          data: JSON.stringify({
+            type: 'message.complete',
+            sessionId,
+            timestamp: Date.now(),
+            data: {
+              content: finalContent,
+              finishReason: 'stop',
+              stepsTaken: steps + 1,
+            },
+          }),
+        });
+
+        return {
+          content: finalContent,
+          finishReason: 'stop',
+          stepsTaken: steps,
+          reasoningSteps: completedReasoningSteps,
+        };
+      }
+
       // No tool calls = final answer
       // Process any structured table JSON blocks into rendered markdown
-      finalContent = processAgentOutput(stepContent);
+      finalContent = processAgentOutput(sanitizeModelFacingContent(stepContent));
+      if (
+        requiresVideoProcessing &&
+        looksLikeOffTopicCodeReplyForVideoTask(finalContent)
+      ) {
+        finalContent =
+          'I extracted context for a video task, but the drafted response was not aligned with video summarization. ' +
+          'Please retry and I will summarize the video from the transcript content only.';
+      }
+
+      const taskGoalForGuard = taskManager.getTaskState?.(sessionId)?.goal;
+      const userQueryForGuard = String(taskGoalForGuard?.description || '');
+      const transcriptToolResult = findLastTranscriptToolResult(currentMessages);
+      const hasTranscriptContext = transcriptToolResult != null;
+      const transcriptIntentByRules =
+        isVideoContentIntentText(userQueryForGuard) ||
+        isTranscriptSegmentFollowupText(userQueryForGuard) ||
+        Boolean(taskGoalForGuard?.requiresTranscript || taskGoalForGuard?.videoUrl);
+      const transcriptIntentByLlm =
+        hasTranscriptContext && !transcriptIntentByRules
+          ? await inferTranscriptFollowupIntentWithLlm({
+              llm: llmClient,
+              query: userQueryForGuard,
+              sessionHasTranscriptContext: true,
+            })
+          : false;
+      const shouldUseTranscriptQa = Boolean(
+        hasTranscriptContext && (transcriptIntentByRules || transcriptIntentByLlm)
+      );
+
+      if (shouldUseTranscriptQa) {
+        try {
+          const transcriptQa = await answerVideoQueryFromTranscript({
+            llm: llmClient,
+            userQuery: userQueryForGuard,
+            transcriptText: transcriptToolResult!,
+          });
+          if (transcriptQa.content) {
+            finalContent = transcriptQa.content;
+          }
+        } catch {
+          // Keep natural model output if semantic transcript QA fails unexpectedly.
+        }
+      }
+
+      const isVideoSummaryForGuard = Boolean(
+        taskGoalForGuard?.videoUrl && isVideoSummaryIntentText(userQueryForGuard)
+      );
+      if (isVideoSummaryForGuard && !videoTranscriptSucceeded && finalContent.length > 100) {
+        finalContent =
+          'I could not obtain transcript evidence for this video yet. Please retry and I will analyze once transcript extraction completes.';
+      }
+
+      if (finalContent) {
+        await sseStream.writeSSE({
+          data: JSON.stringify({
+            type: 'message.delta',
+            sessionId,
+            timestamp: Date.now(),
+            data: { content: finalContent, step: steps + 1 },
+          }),
+        });
+      }
 
       if (generatingStepId) {
         await emitReasoningStep({
@@ -750,9 +1134,75 @@ async function processAgentTurn(
 
     // Execute each tool
     for (const toolCall of toolCallsCollected) {
-      const params = JSON.parse(toolCall.arguments || '{}');
+      let params: Record<string, any> = {};
+      try {
+        params = JSON.parse(toolCall.arguments || '{}');
+      } catch {
+        // Keep empty params if JSON parsing fails
+      }
+      const taskStateForTool = taskManager.getTaskState?.(sessionId);
+      if (
+        toolCall.name === 'video_transcript' &&
+        taskStateForTool?.goal?.requiresTranscript &&
+        params.includeTimestamps === false
+      ) {
+        params.includeTimestamps = true;
+      }
+      if (toolCall.name === 'video_transcript' && !params.durationSeconds) {
+        const durationSeconds = findLastVideoDurationSeconds(currentMessages);
+        if (durationSeconds) {
+          params.durationSeconds = durationSeconds;
+        }
+      }
       let videoSnapshotActionIndex = 0;
       let videoSnapshotBrowserLaunched = false;
+      const isSearch = searchToolNames.has(toolCall.name);
+      const queries = Array.isArray((params as any).queries)
+        ? (params as any).queries
+        : (params as any).query
+          ? [(params as any).query]
+          : undefined;
+
+      await emitReasoningStep({
+        stepId: `tool-${toolCall.id}`,
+        label: isSearch ? 'Searching' : videoToolLabels[toolCall.name] || 'Executing tool',
+        status: 'running',
+        message: isSearch
+          ? `Executing ${queries?.length || 1} search quer${queries?.length === 1 ? 'y' : 'ies'}...`
+          : `Running ${toolCall.name}...`,
+        details: {
+          queries,
+          toolName: toolCall.name,
+        },
+      });
+
+      await sseStream.writeSSE({
+        data: JSON.stringify({
+          type: 'tool.start',
+          sessionId,
+          timestamp: Date.now(),
+          data: {
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            params,
+            step: steps + 1,
+          },
+        }),
+      });
+
+      if (toolCall.name === 'web_search') {
+        await sseStream.writeSSE({
+          data: JSON.stringify({
+            type: 'inspector.focus',
+            sessionId,
+            timestamp: Date.now(),
+            data: {
+              tab: 'computer',
+              reason: 'Web search is tracked in Computer view',
+            },
+          }),
+        });
+      }
 
       // Check if tool call should be allowed
       const toolCheck = taskManager.getToolCallDecision(
@@ -802,7 +1252,7 @@ async function processAgentTurn(
         const result = await toolExecutor.execute(toolCall.name, params, {
           onProgress: async (current: number, total: number, message?: string) => {
             let progressMessage = message;
-            if (toolCall.name === 'video_download') {
+            if (videoToolNames.has(toolCall.name)) {
               const snapshot = decodeVideoSnapshotProgress(message);
               if (snapshot) {
                 const videoUrl =
@@ -938,6 +1388,10 @@ async function processAgentTurn(
           content: toolResultContent,
           tool_call_id: toolCall.id,
         });
+        toolResultsThisTurn += 1;
+        if (toolCall.name === 'video_transcript' && result.success) {
+          videoTranscriptSucceeded = true;
+        }
 
         await sseStream.writeSSE({
           data: JSON.stringify({
@@ -1008,7 +1462,7 @@ async function processAgentTurn(
     }
 
     steps++;
-    finalContent += stepContent; // Accumulate content across steps
+    // Keep non-final draft content out of user-facing accumulated output.
 
     // Emit thinking.start before next LLM call so frontend shows progress
     // This prevents the UI from appearing "stuck" between tool execution steps
@@ -1352,6 +1806,35 @@ DEPENDENCY RECOVERY RULES:
           role: 'system',
           content: systemPromptContentGet + (taskContext ? `\n\n${taskContext}` : ''),
         });
+      }
+
+      const latestContent = String(latestUserMessage.content || '');
+      const requestedVideoUrl = extractFirstVideoUrlFromText(latestContent) || undefined;
+      const transcriptFollowupIntentByRules =
+        isVideoContentIntentText(latestContent) || isTranscriptSegmentFollowupText(latestContent);
+      const transcriptFollowupIntent =
+        transcriptFollowupIntentByRules ||
+        (await inferTranscriptFollowupIntentWithLlm({
+          llm: llmClient,
+          query: latestContent,
+          sessionHasTranscriptContext: true,
+        }));
+      if (transcriptFollowupIntent) {
+        const historicalTranscript = await loadLatestTranscriptToolMessageForSession(
+          sessionId,
+          requestedVideoUrl
+        );
+        if (historicalTranscript) {
+          const hasTranscriptToolContext = baseMessages.some(
+            (msg) =>
+              msg.role === 'tool' &&
+              typeof msg.content === 'string' &&
+              msg.content.includes('--- Transcript ---')
+          );
+          if (!hasTranscriptToolContext) {
+            baseMessages.push(historicalTranscript.toolMessage);
+          }
+        }
       }
 
       // Process agent turn with continuation loop
@@ -1818,6 +2301,34 @@ DEPENDENCY RECOVERY RULES:
           role: 'system',
           content: systemPromptContent + (taskContext ? `\n\n${taskContext}` : ''),
         });
+      }
+
+      const requestedVideoUrl = extractFirstVideoUrlFromText(content) || undefined;
+      const transcriptFollowupIntentByRules =
+        isVideoContentIntentText(content) || isTranscriptSegmentFollowupText(content);
+      const transcriptFollowupIntent =
+        transcriptFollowupIntentByRules ||
+        (await inferTranscriptFollowupIntentWithLlm({
+          llm: llmClient,
+          query: content,
+          sessionHasTranscriptContext: true,
+        }));
+      if (transcriptFollowupIntent) {
+        const historicalTranscript = await loadLatestTranscriptToolMessageForSession(
+          sessionId,
+          requestedVideoUrl
+        );
+        if (historicalTranscript) {
+          const hasTranscriptToolContext = baseMessages.some(
+            (msg) =>
+              msg.role === 'tool' &&
+              typeof msg.content === 'string' &&
+              msg.content.includes('--- Transcript ---')
+          );
+          if (!hasTranscriptToolContext) {
+            baseMessages.push(historicalTranscript.toolMessage);
+          }
+        }
       }
 
       // DEBUG: Log all messages being sent to LLM

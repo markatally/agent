@@ -337,18 +337,21 @@ function createToolTimelineStep(
     toolCalls.reduce((total, call) => total + (typeof call.result?.duration === 'number' ? call.result.duration : 0), 0) ||
     undefined;
 
+  const statusFromReasoningStep: StepStatus | undefined = step
+    ? step.status === 'running'
+      ? 'running'
+      : step.status === 'failed'
+        ? 'failed'
+        : 'completed'
+    : undefined;
+
   return {
     id: step?.stepId ?? fallbackId,
     type: 'tool',
     title: titleForStepType('tool'),
-    status: getToolStepStatus(
-      toolCalls,
-      step?.status === 'running'
-        ? 'running'
-        : step?.status === 'failed'
-          ? 'failed'
-          : 'completed'
-    ),
+    // If a reasoning step exists, it is the source-of-truth for lifecycle.
+    // Tool call status is only used for orphan tool rows without reasoning-step context.
+    status: statusFromReasoningStep ?? getToolStepStatus(toolCalls, 'completed'),
     startedAt: step?.startedAt,
     completedAt: step?.completedAt,
     durationMs: step?.durationMs ?? fallbackDuration,
@@ -427,6 +430,31 @@ function dedupeTimelineToolSteps(steps: TimelineStep[]): TimelineStep[] {
   }
 
   return deduped;
+}
+
+function enforceLinearRunningInvariant(steps: TimelineStep[]): TimelineStep[] {
+  const runningIndices = steps
+    .map((step, index) => (step.status === 'running' ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (runningIndices.length <= 1) return steps;
+  const keepRunningIndex = runningIndices[runningIndices.length - 1];
+
+  return steps.map((step, index) => {
+    if (step.status !== 'running' || index === keepRunningIndex) return step;
+    const next = steps[index + 1];
+    const completedAt =
+      next?.startedAt ?? next?.completedAt ?? (typeof step.startedAt === 'number' ? step.startedAt : Date.now());
+    return {
+      ...step,
+      status: 'completed',
+      completedAt,
+      durationMs:
+        typeof step.startedAt === 'number'
+          ? Math.max(0, completedAt - step.startedAt)
+          : step.durationMs,
+    };
+  });
 }
 
 function getStepDuration(step: TimelineStep, nowMs: number): string | null {
@@ -945,7 +973,9 @@ export function ReasoningTrace({ sessionId, selectedMessageId }: ReasoningTraceP
       rawSteps.push(createToolTimelineStep(undefined, [toolCall], `orphan-tool-${toolCall.toolCallId}`));
     }
 
-    return dedupeTimelineToolSteps(mergeAdjacentTimelineSteps(rawSteps));
+    return enforceLinearRunningInvariant(
+      dedupeTimelineToolSteps(mergeAdjacentTimelineSteps(rawSteps))
+    );
   }, [reasoningSteps, toolCalls]);
 
   const hasRunningEntries = timelineSteps.some((step) => step.status === 'running');
@@ -1116,10 +1146,10 @@ export function ReasoningTrace({ sessionId, selectedMessageId }: ReasoningTraceP
                     </div>
                   ) : null}
 
-                  {traceMode === 'debug' && step.thinkingContent ? (
+                  {step.thinkingContent ? (
                     <details className="border-t border-border/50 pt-2">
                       <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-                        Internal Reasoning
+                        {traceMode === 'debug' ? 'Internal Reasoning' : 'Thinking'}
                       </summary>
                       <div className="prose prose-sm mt-2 max-w-none min-w-0 overflow-x-hidden text-muted-foreground">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{step.thinkingContent}</ReactMarkdown>

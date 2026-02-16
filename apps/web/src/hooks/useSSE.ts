@@ -32,6 +32,7 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
   const completeToolCall = useChatStore((state) => state.completeToolCall);
   const associateToolCallsWithMessage = useChatStore((state) => state.associateToolCallsWithMessage);
   const applyReasoningEvent = useChatStore((state) => state.applyReasoningEvent);
+  const finalizeReasoningTrace = useChatStore((state) => state.finalizeReasoningTrace);
   const clearReasoningSteps = useChatStore((state) => state.clearReasoningSteps);
   const addFileArtifact = useChatStore((state) => state.addFileArtifact);
   const stopStreaming = useChatStore((state) => state.stopStreaming);
@@ -91,6 +92,10 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
             break;
 
           case 'message.complete':
+            finalizeReasoningTrace(
+              sessionId,
+              typeof event.timestamp === 'number' ? event.timestamp : Date.now()
+            );
             if (event.data?.assistantMessageId) {
               associateToolCallsWithMessage(sessionId, event.data.assistantMessageId);
             }
@@ -244,6 +249,7 @@ export function useSSE({ sessionId, enabled, onComplete, onError }: UseSSEOption
     updateToolCallProgress,
     completeToolCall,
     applyReasoningEvent,
+    finalizeReasoningTrace,
     clearReasoningSteps,
     addFileArtifact,
     stopStreaming,

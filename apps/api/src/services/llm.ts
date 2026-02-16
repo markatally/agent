@@ -219,6 +219,33 @@ export class LLMClient {
   }
 
   /**
+   * Generate embeddings for semantic retrieval.
+   * In tests we return deterministic pseudo-vectors so retrieval logic remains stable without API calls.
+   */
+  async embedTexts(texts: string[]): Promise<number[][]> {
+    if (!Array.isArray(texts) || texts.length === 0) return [];
+    if (this.isTestEnv) {
+      return texts.map((text) => {
+        const vec = new Array<number>(64).fill(0);
+        const normalized = String(text || '');
+        for (let i = 0; i < normalized.length; i += 1) {
+          const code = normalized.charCodeAt(i);
+          vec[i % vec.length] += ((code % 97) + 1) / 97;
+        }
+        const norm = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0)) || 1;
+        return vec.map((v) => v / norm);
+      });
+    }
+
+    const model = process.env.LLM_EMBEDDING_MODEL || 'text-embedding-3-small';
+    const response = await this.client.embeddings.create({
+      model,
+      input: texts,
+    });
+    return response.data.map((item) => item.embedding);
+  }
+
+  /**
    * Get the current model name
    */
   getModel(): string {
