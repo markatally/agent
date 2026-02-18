@@ -58,6 +58,7 @@ const PPT_PIPELINE_STAGE_ORDER = [
   'generating',
   'finalizing',
 ] as const;
+const TERMINAL_STREAM_EVENT_TYPES = new Set(['message.complete', 'session.end', 'error']);
 
 export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const location = useLocation();
@@ -95,6 +96,7 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
   const clearToolCalls = useChatStore((state) => state.clearToolCalls);
   const clearPptPipeline = useChatStore((state) => state.clearPptPipeline);
   const applyReasoningEvent = useChatStore((state) => state.applyReasoningEvent);
+  const finalizeReasoningTrace = useChatStore((state) => state.finalizeReasoningTrace);
   const clearReasoningSteps = useChatStore((state) => state.clearReasoningSteps);
   const setInspectorTab = useChatStore((state) => state.setInspectorTab);
   const setInspectorOpen = useChatStore((state) => state.setInspectorOpen);
@@ -954,6 +956,9 @@ export function ChatContainer({ sessionId, onOpenSkills }: ChatContainerProps) {
         abortControllerRef.current.signal
       )) {
         handleSSEEvent(event as SSEEvent);
+        if (TERMINAL_STREAM_EVENT_TYPES.has((event as SSEEvent).type)) {
+          break;
+        }
       }
 
       // Fallback cleanup: if stream ended without terminal event (e.g. message.complete/session.end),

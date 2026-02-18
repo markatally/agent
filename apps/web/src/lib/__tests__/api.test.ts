@@ -338,6 +338,59 @@ describe('API Client', () => {
     });
   });
 
+  describe('Chat Streaming', () => {
+    it('should stop reading stream after terminal event and ignore trailing events', async () => {
+      const reader = {
+        cancel: vi.fn().mockResolvedValue(undefined),
+        releaseLock: vi.fn(),
+        read: vi
+          .fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: new TextEncoder().encode(
+              [
+                'data: {"type":"message.start","sessionId":"session-1","timestamp":1,"data":{}}',
+                'data: {"type":"message.complete","sessionId":"session-1","timestamp":2,"data":{"assistantMessageId":"a-1"}}',
+                '',
+              ].join('\n')
+            ),
+          })
+          .mockResolvedValueOnce({
+            done: false,
+            value: new TextEncoder().encode(
+              [
+                'data: {"type":"message.start","sessionId":"session-1","timestamp":3,"data":{}}',
+                '',
+              ].join('\n')
+            ),
+          })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+      };
+
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => reader,
+        },
+      });
+
+      const { apiClient } = await import('../api');
+      const events: Array<{ type: string }> = [];
+
+      for await (const event of apiClient.chat.sendAndStream('session-1', 'hello')) {
+        events.push({ type: event.type });
+      }
+
+      expect(events.map((event) => event.type)).toEqual([
+        'message.start',
+        'message.complete',
+      ]);
+      expect(reader.read).toHaveBeenCalledTimes(1);
+      expect(reader.cancel).toHaveBeenCalledTimes(1);
+      expect(reader.releaseLock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('Type Safety', () => {
     it('should return data directly (not response.data)', async () => {
       // This tests the API contract bug pattern from screenshot

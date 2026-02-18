@@ -83,4 +83,48 @@ describe('ChatContainer stream fallback cleanup', () => {
       expect(state.streamingSessionId).toBe(null);
     });
   });
+
+  it('ignores trailing events after message.complete', async () => {
+    vi.spyOn(apiClient.chat, 'sendAndStream').mockImplementation(
+      async function* () {
+        yield {
+          type: 'message.start',
+          sessionId: 'session-1',
+          timestamp: Date.now(),
+          data: {},
+        } as any;
+        yield {
+          type: 'message.complete',
+          sessionId: 'session-1',
+          timestamp: Date.now(),
+          data: { assistantMessageId: null },
+        } as any;
+        // Should never be processed because ChatContainer exits on terminal events.
+        yield {
+          type: 'message.start',
+          sessionId: 'session-1',
+          timestamp: Date.now(),
+          data: {},
+        } as any;
+      }
+    );
+
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ChatContainer sessionId="session-1" />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByText('send'));
+
+    await waitFor(() => {
+      const state = useChatStore.getState();
+      expect(state.isStreaming).toBe(false);
+      expect(state.isThinking).toBe(false);
+      expect(state.streamingSessionId).toBe(null);
+    });
+  });
 });

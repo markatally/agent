@@ -323,6 +323,8 @@ export interface SSEEvent {
   data: any;
 }
 
+const TERMINAL_SSE_EVENT_TYPES = new Set(['message.complete', 'session.end', 'error']);
+
 // Chat API (streaming)
 export const chatApi = {
   /**
@@ -377,6 +379,7 @@ export const chatApi = {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    let terminatedByEvent = false;
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -395,16 +398,24 @@ export const chatApi = {
               try {
                 const event: SSEEvent = JSON.parse(jsonStr);
                 yield event;
+                if (TERMINAL_SSE_EVENT_TYPES.has(event.type)) {
+                  terminatedByEvent = true;
+                  break;
+                }
               } catch (e) {
                 console.error('Failed to parse SSE event:', e, jsonStr);
               }
             }
           }
         }
+
+        if (terminatedByEvent) {
+          break;
+        }
       }
 
       // Process any remaining data in buffer
-      if (buffer.startsWith('data: ')) {
+      if (!terminatedByEvent && buffer.startsWith('data: ')) {
         const jsonStr = buffer.slice(6);
         if (jsonStr.trim()) {
           try {
@@ -416,6 +427,13 @@ export const chatApi = {
         }
       }
     } finally {
+      if (terminatedByEvent) {
+        try {
+          await reader.cancel();
+        } catch {
+          // Ignore reader cancellation errors during teardown.
+        }
+      }
       reader.releaseLock();
     }
   },
